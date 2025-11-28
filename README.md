@@ -84,7 +84,7 @@ Com o servidor rodando, acesse:
 ## Próximos Passos
 
 - [ ] Persistência de sessões (Postgres/Redis)
-- [ ] Integração com ACE/NASA
+- [ ] Integração com ACE
 - [ ] Logging estruturado
 - [ ] Métricas e observabilidade
 - [ ] Testes automatizados

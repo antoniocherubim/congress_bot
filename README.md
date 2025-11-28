@@ -31,7 +31,7 @@ pip install -r requirements.txt
 Crie um arquivo `.env` na raiz do projeto (não versionado) com:
 ```
 OPENAI_API_KEY=sua-chave-aqui
-OPENAI_MODEL=gpt-4o-mini  # opcional, padrão é gpt-4o-mini
+OPENAI_MODEL=gpt-4o-mini  # opcional, padrão é gpt-3o-mini
 ```
 
 O sistema carrega automaticamente as variáveis do arquivo `.env`. 

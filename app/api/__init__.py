@@ -1,0 +1,4 @@
+"""
+Camada de API HTTP.
+"""
+

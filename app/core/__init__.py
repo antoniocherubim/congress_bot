@@ -1,0 +1,4 @@
+"""
+Núcleo lógico do chatbot.
+"""
+

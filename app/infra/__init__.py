@@ -1,0 +1,4 @@
+"""
+Infraestrutura e integrações externas.
+"""
+

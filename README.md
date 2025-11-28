@@ -1,6 +1,6 @@
 # Event Bot - Chatbot para Congresso
 
-MVP de um chatbot para congresso na área do agro, com arquitetura preparada para evoluir para ACE/NASA.
+MVP de um chatbot para congresso na área do agro, com arquitetura preparada para evoluir para sistema de matchmaking.
 
 ## Estrutura do Projeto
 

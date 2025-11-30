@@ -35,6 +35,9 @@ class RegistrationManager:
         keywords = [
             "inscrever",
             "inscrição",
+            "inscricao",
+            "inscriçao",
+            "inscricão",
             "inscrever-me",
             "quero participar",
             "como participar",
@@ -305,9 +308,10 @@ Está tudo correto? Responda 'sim' para confirmar ou 'não' para reiniciar o cad
                                 to_email=data.email,
                                 full_name=data.full_name,
                             )
-                            logger.info(
-                                f"E-mail de confirmação enviado: "
-                                f"to={data.email}"
+                            # O EmailService já loga internamente se foi enviado ou apenas simulado
+                            # Este log adicional confirma que o processo foi concluído
+                            logger.debug(
+                                f"Processo de envio de e-mail concluído: to={data.email}"
                             )
                         except Exception as email_error:
                             logger.error(

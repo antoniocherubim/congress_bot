@@ -62,11 +62,16 @@ Equipe BioSummit
 
         if self._config.smtp_host == "dev-log":
             # Modo desenvolvimento: apenas logar
+            logger.warning(
+                f"⚠️ MODO DEV: E-mail NÃO foi enviado (apenas simulado). "
+                f"Para enviar e-mails reais, configure SMTP_HOST no .env. "
+                f"Destinatário: {to_email}"
+            )
             logger.info(
                 f"E-mail de confirmação (FAKE) logado para destinatário: {to_email}"
             )
             print("\n" + "=" * 60)
-            print("📧 E-MAIL DE CONFIRMAÇÃO (DEV MODE)")
+            print("📧 E-MAIL DE CONFIRMAÇÃO (DEV MODE - NÃO ENVIADO)")
             print("=" * 60)
             print(f"De: {msg['From']}")
             print(f"Para: {msg['To']}")
@@ -79,15 +84,20 @@ Equipe BioSummit
             try:
                 logger.info(
                     f"Iniciando conexão SMTP: host={self._config.smtp_host}, "
-                    f"port={self._config.smtp_port}"
+                    f"port={self._config.smtp_port}, from={self._config.smtp_from}"
                 )
                 with smtplib.SMTP(self._config.smtp_host, self._config.smtp_port) as server:
                     if self._config.smtp_user:
+                        logger.debug(
+                            f"Autenticando SMTP: user={self._config.smtp_user}"
+                        )
                         server.starttls()
                         server.login(self._config.smtp_user, self._config.smtp_password)
+                    logger.debug(f"Enviando mensagem SMTP para: {to_email}")
                     server.send_message(msg)
                 logger.info(
-                    f"E-mail enviado com sucesso: to={to_email}"
+                    f"✅ E-mail REAL enviado com sucesso via SMTP: to={to_email}, "
+                    f"host={self._config.smtp_host}"
                 )
             except SMTPException as e:
                 logger.error(

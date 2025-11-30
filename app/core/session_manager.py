@@ -1,7 +1,10 @@
+import logging
 from typing import Dict, List
 from dataclasses import dataclass, field
 from .models import Message, ChatTurn, Role
 from .registration_state import RegistrationStep, RegistrationData
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -48,6 +51,9 @@ class InMemorySessionManager:
 
     def get_or_create(self, user_id: str) -> ConversationState:
         if user_id not in self._sessions:
+            logger.debug(f"Nova ConversationState criada: user_id={user_id}")
             self._sessions[user_id] = ConversationState(user_id=user_id)
+        else:
+            logger.debug(f"ConversationState recuperada: user_id={user_id}, turns={len(self._sessions[user_id].history)}")
         return self._sessions[user_id]
 

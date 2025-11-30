@@ -1,7 +1,10 @@
-from fastapi import FastAPI
+import logging
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from ..config import AppConfig
 from ..core.engine import ChatbotEngine
+
+logger = logging.getLogger(__name__)
 
 
 class ChatRequest(BaseModel):
@@ -30,11 +33,40 @@ def create_app() -> FastAPI:
 
     @app.post("/chat", response_model=ChatResponse)
     def chat_endpoint(payload: ChatRequest) -> ChatResponse:
-        result = engine.handle_message(
-            user_id=payload.user_id,
-            message_text=payload.message,
+        logger.info(
+            f"Recebida requisição /chat para user_id={payload.user_id}, "
+            f"message_length={len(payload.message)}"
         )
-        return ChatResponse(**result)
+        logger.debug(
+            f"Payload completo: user_id={payload.user_id}, "
+            f"message_preview={payload.message[:80]}..."
+        )
+        
+        try:
+            result = engine.handle_message(
+                user_id=payload.user_id,
+                message_text=payload.message,
+            )
+            
+            logger.info(
+                f"Resposta gerada para user_id={payload.user_id}, "
+                f"turns={result.get('turns', 0)}"
+            )
+            logger.debug(
+                f"Resposta completa para user_id={payload.user_id}: "
+                f"reply_preview={result.get('reply', '')[:100]}..."
+            )
+            
+            return ChatResponse(**result)
+        except Exception as e:
+            logger.error(
+                f"Erro ao processar mensagem para user_id={payload.user_id}: {type(e).__name__}: {e}",
+                exc_info=True,
+            )
+            raise HTTPException(
+                status_code=500,
+                detail="Erro interno ao processar sua mensagem. Tente novamente mais tarde.",
+            )
 
     return app
 

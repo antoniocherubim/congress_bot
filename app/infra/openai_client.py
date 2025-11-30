@@ -1,7 +1,10 @@
+import logging
 from typing import List, Dict, Any
 from openai import OpenAI
 from ..core.models import Message, Role
 from ..config import AppConfig
+
+logger = logging.getLogger(__name__)
 
 
 class LanguageModelClient:
@@ -29,10 +32,44 @@ class LanguageModelClient:
         """
         api_messages = self.build_payload(system_prompt, messages)
         
-        response = self._client.chat.completions.create(
-            model=self._config.openai_model,
-            messages=api_messages,
+        logger.debug(
+            f"Chamando OpenAI API: model={self._config.openai_model}, "
+            f"num_messages={len(api_messages)}"
         )
         
-        return response.choices[0].message.content.strip()
+        try:
+            response = self._client.chat.completions.create(
+                model=self._config.openai_model,
+                messages=api_messages,
+            )
+            
+            reply_text = response.choices[0].message.content.strip()
+            
+            # ASSERT: garantir que a resposta não está vazia
+            if not reply_text or not reply_text.strip():
+                logger.error(
+                    f"Resposta vazia recebida da OpenAI: model={self._config.openai_model}, "
+                    f"num_messages={len(api_messages)}"
+                )
+                raise ValueError(
+                    "Resposta vazia recebida da OpenAI. "
+                    "Isso indica um erro no modelo ou no parsing da resposta."
+                )
+            
+            logger.debug(
+                f"Resposta recebida da OpenAI: reply_length={len(reply_text)} caracteres"
+            )
+            logger.info(
+                f"Chamada à OpenAI bem-sucedida: model={self._config.openai_model}"
+            )
+            
+            return reply_text
+            
+        except Exception as e:
+            logger.error(
+                f"Erro inesperado ao chamar OpenAI: model={self._config.openai_model}, "
+                f"error={type(e).__name__}: {e}",
+                exc_info=True,
+            )
+            raise
 

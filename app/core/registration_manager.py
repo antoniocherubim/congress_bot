@@ -1,10 +1,14 @@
+import logging
 from typing import Tuple
 from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from .session_manager import ConversationState
 from .registration_state import RegistrationStep, RegistrationData
 from .normalizers import normalize_phone, normalize_city_state, normalize_profile, UF_MAP
 from ..storage.repository import ParticipantRepository
 from ..infra.email_service import EmailService
+
+logger = logging.getLogger(__name__)
 
 
 class RegistrationManager:
@@ -65,6 +69,9 @@ class RegistrationManager:
         # 1. IDLE: detectar intenção de inscrição
         if step == RegistrationStep.IDLE:
             if self._detect_registration_intent(user_text):
+                logger.info(
+                    f"Usuário iniciou fluxo de inscrição: user_id={state.user_id}"
+                )
                 state.registration_step = RegistrationStep.ASKING_NAME
                 return (
                     state,
@@ -77,6 +84,10 @@ class RegistrationManager:
         if step == RegistrationStep.ASKING_NAME:
             if user_text.strip():
                 data.full_name = user_text.strip()
+                logger.debug(
+                    f"Nome coletado: user_id={state.user_id}, "
+                    f"name={data.full_name}"
+                )
                 state.registration_step = RegistrationStep.ASKING_EMAIL
                 return (
                     state,
@@ -92,11 +103,19 @@ class RegistrationManager:
             email = user_text.strip()
             if self._is_valid_email(email):
                 data.email = email
+                logger.debug(
+                    f"E-mail coletado: user_id={state.user_id}, "
+                    f"email={email}"
+                )
                 state.registration_step = RegistrationStep.ASKING_PHONE
                 return (
                     state,
                     "Ótimo! Agora, por favor, me informe seu telefone com DDD.",
                 )
+            logger.warning(
+                f"E-mail inválido recebido: user_id={state.user_id}, "
+                f"email_input={email[:50]}"
+            )
             return (
                 state,
                 "E-mail inválido. Por favor, informe um e-mail válido (exemplo: seu.nome@email.com).",
@@ -106,12 +125,20 @@ class RegistrationManager:
         if step == RegistrationStep.ASKING_PHONE:
             parsed_phone = normalize_phone(user_text)
             if not parsed_phone:
+                logger.warning(
+                    f"Telefone inválido recebido: user_id={state.user_id}, "
+                    f"phone_input={user_text[:30]}"
+                )
                 return (
                     state,
                     "Não consegui entender seu telefone. "
                     "Envie no formato com DDD, por exemplo: 41999999999.",
                 )
             data.phone = parsed_phone
+            logger.debug(
+                f"Telefone normalizado: user_id={state.user_id}, "
+                f"phone={parsed_phone}"
+            )
             state.registration_step = RegistrationStep.ASKING_CITY
             return (
                 state,
@@ -129,12 +156,20 @@ class RegistrationManager:
             city, uf = normalize_city_state(user_text)
             
             if not city:
+                logger.warning(
+                    f"Cidade não identificada: user_id={state.user_id}, "
+                    f"input={user_text[:50]}"
+                )
                 return (
                     state,
                     "Não consegui entender sua cidade. Por favor, informe o nome da sua cidade.",
                 )
             
             data.city = city
+            logger.debug(
+                f"Cidade coletada: user_id={state.user_id}, "
+                f"city={city}, uf={uf or 'não informado'}"
+            )
             
             # Se já veio com UF, pula o passo de estado
             if uf:
@@ -177,6 +212,10 @@ class RegistrationManager:
                             break
             
             if not uf:
+                logger.warning(
+                    f"Estado (UF) não identificado: user_id={state.user_id}, "
+                    f"input={user_text[:50]}"
+                )
                 return (
                     state,
                     "Não consegui entender seu estado. "
@@ -184,6 +223,10 @@ class RegistrationManager:
                 )
             
             data.state = uf
+            logger.debug(
+                f"Estado coletado: user_id={state.user_id}, "
+                f"state={uf}"
+            )
             state.registration_step = RegistrationStep.ASKING_PROFILE
             return (
                 state,
@@ -200,6 +243,10 @@ class RegistrationManager:
                 )
             
             data.profile = normalize_profile(user_text)
+            logger.debug(
+                f"Perfil normalizado: user_id={state.user_id}, "
+                f"profile={data.profile}"
+            )
             state.registration_step = RegistrationStep.CONFIRMING
             
             # Montar resumo com dados normalizados
@@ -220,11 +267,16 @@ Está tudo correto? Responda 'sim' para confirmar ou 'não' para reiniciar o cad
             response_lower = user_text.strip().lower()
             
             if response_lower.startswith("sim"):
+                logger.info(
+                    f"Inscrição será confirmada: user_id={state.user_id}, "
+                    f"email={data.email}"
+                )
+                
                 # Salvar no banco de dados
                 db_session: Session = self._db_session_factory()
                 try:
                     repo = ParticipantRepository(db_session)
-                    repo.create_participant(
+                    participant = repo.create_participant(
                         full_name=data.full_name or "",
                         email=data.email or "",
                         phone=data.phone,
@@ -233,12 +285,38 @@ Está tudo correto? Responda 'sim' para confirmar ou 'não' para reiniciar o cad
                         profile=data.profile,
                     )
                     
+                    # ASSERT: garantir que o participante foi persistido com ID
+                    assert participant.id is not None, (
+                        f"Participant persisted without id! "
+                        f"This indicates a persistence error. "
+                        f"user_id={state.user_id}, email={data.email}"
+                    )
+                    
+                    logger.info(
+                        f"Participante criado no banco: "
+                        f"id={participant.id}, name={participant.full_name}, "
+                        f"email={participant.email}"
+                    )
+                    
                     # Enviar e-mail de confirmação
                     if data.email and data.full_name:
-                        self._email_service.send_registration_confirmation(
-                            to_email=data.email,
-                            full_name=data.full_name,
-                        )
+                        try:
+                            self._email_service.send_registration_confirmation(
+                                to_email=data.email,
+                                full_name=data.full_name,
+                            )
+                            logger.info(
+                                f"E-mail de confirmação enviado: "
+                                f"to={data.email}"
+                            )
+                        except Exception as email_error:
+                            logger.error(
+                                f"Falha ao enviar e-mail de confirmação: "
+                                f"to={data.email}, error={type(email_error).__name__}: {email_error}",
+                                exc_info=True,
+                            )
+                            # Não interrompe o fluxo, mas loga o erro
+                            # O usuário já foi registrado no banco
                     
                     state.registration_step = RegistrationStep.COMPLETED
                     return (
@@ -247,6 +325,31 @@ Está tudo correto? Responda 'sim' para confirmar ou 'não' para reiniciar o cad
                         "Você receberá um e-mail de confirmação em breve.\n"
                         "Se precisar de mais alguma coisa sobre o BioSummit 2026, é só me chamar.",
                     )
+                except (IntegrityError, SQLAlchemyError) as db_error:
+                    logger.error(
+                        f"Erro ao persistir participante no banco: "
+                        f"user_id={state.user_id}, email={data.email}, "
+                        f"error={type(db_error).__name__}: {db_error}",
+                        exc_info=True,
+                    )
+                    # Relançar para que o engine possa tratar
+                    raise
+                except AssertionError as assert_error:
+                    logger.error(
+                        f"Assertion falhou ao persistir participante: "
+                        f"user_id={state.user_id}, email={data.email}, "
+                        f"error={assert_error}",
+                        exc_info=True,
+                    )
+                    raise
+                except Exception as e:
+                    logger.error(
+                        f"Erro inesperado ao processar inscrição: "
+                        f"user_id={state.user_id}, email={data.email}, "
+                        f"error={type(e).__name__}: {e}",
+                        exc_info=True,
+                    )
+                    raise
                 finally:
                     db_session.close()
             

@@ -1,6 +1,10 @@
+import logging
 import smtplib
 from email.message import EmailMessage
+from smtplib import SMTPException
 from ..config import AppConfig
+
+logger = logging.getLogger(__name__)
 
 
 class EmailService:
@@ -16,7 +20,24 @@ class EmailService:
         """
         Envia e-mail de confirmação de inscrição.
         """
+        # ASSERT: garantir que dados básicos estão presentes
+        if not to_email or not to_email.strip():
+            logger.error(
+                f"Tentativa de envio de e-mail sem destinatário: full_name={full_name}"
+            )
+            raise ValueError("to_email não pode estar vazio")
+        
+        if not full_name or not full_name.strip():
+            logger.error(
+                f"Tentativa de envio de e-mail sem nome: to_email={to_email}"
+            )
+            raise ValueError("full_name não pode estar vazio")
+        
         subject = "Confirmação de inscrição - BioSummit 2026"
+        logger.debug(
+            f"Montando e-mail de confirmação: to={to_email}, subject={subject}"
+        )
+        
         body = f"""Olá, {full_name}!
 
 Sua inscrição no BioSummit 2026 foi confirmada com sucesso! 🎟️
@@ -41,6 +62,9 @@ Equipe BioSummit
 
         if self._config.smtp_host == "dev-log":
             # Modo desenvolvimento: apenas logar
+            logger.info(
+                f"E-mail de confirmação (FAKE) logado para destinatário: {to_email}"
+            )
             print("\n" + "=" * 60)
             print("📧 E-MAIL DE CONFIRMAÇÃO (DEV MODE)")
             print("=" * 60)
@@ -52,9 +76,31 @@ Equipe BioSummit
             print("=" * 60 + "\n")
         else:
             # Modo produção: enviar via SMTP
-            with smtplib.SMTP(self._config.smtp_host, self._config.smtp_port) as server:
-                if self._config.smtp_user:
-                    server.starttls()
-                    server.login(self._config.smtp_user, self._config.smtp_password)
-                server.send_message(msg)
+            try:
+                logger.info(
+                    f"Iniciando conexão SMTP: host={self._config.smtp_host}, "
+                    f"port={self._config.smtp_port}"
+                )
+                with smtplib.SMTP(self._config.smtp_host, self._config.smtp_port) as server:
+                    if self._config.smtp_user:
+                        server.starttls()
+                        server.login(self._config.smtp_user, self._config.smtp_password)
+                    server.send_message(msg)
+                logger.info(
+                    f"E-mail enviado com sucesso: to={to_email}"
+                )
+            except SMTPException as e:
+                logger.error(
+                    f"Erro SMTP ao enviar e-mail: to={to_email}, "
+                    f"error={type(e).__name__}: {e}",
+                    exc_info=True,
+                )
+                raise
+            except Exception as e:
+                logger.error(
+                    f"Erro inesperado ao enviar e-mail: to={to_email}, "
+                    f"error={type(e).__name__}: {e}",
+                    exc_info=True,
+                )
+                raise
 

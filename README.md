@@ -1,6 +1,6 @@
 # Event Bot - Chatbot para Congresso
 
-MVP de um chatbot para congresso na área do agro, com arquitetura preparada para evoluir para ACE/NASA.
+MVP de um chatbot para congresso na área do agro, com arquitetura preparada para evoluir para sistema de matchmaking.
 
 ## Estrutura do Projeto
 
@@ -31,7 +31,7 @@ pip install -r requirements.txt
 Crie um arquivo `.env` na raiz do projeto (não versionado) com:
 ```
 OPENAI_API_KEY=sua-chave-aqui
-OPENAI_MODEL=gpt-4o-mini  # opcional, padrão é gpt-4o-mini
+OPENAI_MODEL=gpt-4o-mini  # opcional, padrão é gpt-3o-mini
 ```
 
 O sistema carrega automaticamente as variáveis do arquivo `.env`. 
@@ -84,7 +84,7 @@ Com o servidor rodando, acesse:
 ## Próximos Passos
 
 - [ ] Persistência de sessões (Postgres/Redis)
-- [ ] Integração com ACE/NASA
+- [ ] Integração com ACE
 - [ ] Logging estruturado
 - [ ] Métricas e observabilidade
 - [ ] Testes automatizados

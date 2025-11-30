@@ -1,6 +1,7 @@
 from typing import Dict, List
 from dataclasses import dataclass, field
 from .models import Message, ChatTurn, Role
+from .registration_state import RegistrationStep, RegistrationData
 
 
 @dataclass
@@ -12,6 +13,8 @@ class ConversationState:
     """
     user_id: str
     history: List[ChatTurn] = field(default_factory=list)
+    registration_step: RegistrationStep = RegistrationStep.IDLE
+    registration_data: RegistrationData = field(default_factory=RegistrationData)
 
     def add_turn(self, user_msg: str, assistant_msg: str) -> None:
         self.history.append(

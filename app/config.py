@@ -13,6 +13,12 @@ class AppConfig:
     """
     openai_api_key: str
     openai_model: str = "gpt-3o-mini"
+    database_url: str = "sqlite:///./biosummit.db"
+    smtp_host: str = "dev-log"
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = "inscricao@biosummit.com.br"
     system_prompt: str = (
         """
         Você é o assistente oficial da terceira edição do BioSummit (BioSummit 2026).
@@ -97,9 +103,21 @@ class AppConfig:
             raise RuntimeError("Variável de ambiente OPENAI_API_KEY não definida.")
 
         model = os.getenv("OPENAI_MODEL", "gpt-3o-mini")
+        database_url = os.getenv("DATABASE_URL", "sqlite:///./biosummit.db")
+        smtp_host = os.getenv("SMTP_HOST", "dev-log")
+        smtp_port = int(os.getenv("SMTP_PORT", "587"))
+        smtp_user = os.getenv("SMTP_USER", "")
+        smtp_password = os.getenv("SMTP_PASSWORD", "")
+        smtp_from = os.getenv("SMTP_FROM", "inscricao@biosummit.com.br")
 
         return cls(
             openai_api_key=api_key,
             openai_model=model,
+            database_url=database_url,
+            smtp_host=smtp_host,
+            smtp_port=smtp_port,
+            smtp_user=smtp_user,
+            smtp_password=smtp_password,
+            smtp_from=smtp_from,
         )
 

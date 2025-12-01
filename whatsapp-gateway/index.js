@@ -15,7 +15,7 @@ app.use(express.json());
 
 const BOT_URL = process.env.BOT_URL || 'http://localhost:8000';
 const BOT_WHATSAPP_ENDPOINT = '/whatsapp';
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3333;
 
 let sockGlobal = null;
 

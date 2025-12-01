@@ -87,13 +87,18 @@ def create_app() -> FastAPI:
         Endpoint para receber mensagens do gateway WhatsApp.
         """
         # Autenticação simples via header X-API-KEY
+        # Se BOT_API_KEY estiver configurada, valida. Se não, permite acesso (modo desenvolvimento)
         expected_key = config.bot_api_key or ""
-        if expected_key and x_api_key != expected_key:
-            logger.warning(
-                f"Tentativa de acesso não autorizado ao endpoint /whatsapp: "
-                f"key_fornecida={'***' if x_api_key else 'nenhuma'}"
-            )
-            raise HTTPException(status_code=401, detail="Invalid API key")
+        if expected_key and expected_key.strip():
+            if x_api_key != expected_key:
+                logger.warning(
+                    f"Tentativa de acesso não autorizado ao endpoint /whatsapp: "
+                    f"key_fornecida={'***' if x_api_key else 'nenhuma'}"
+                )
+                raise HTTPException(status_code=401, detail="Invalid API key")
+        else:
+            # Modo desenvolvimento: sem chave configurada, aceita todas as requisições
+            logger.debug("BOT_API_KEY não configurada, aceitando requisição sem autenticação (modo desenvolvimento)")
 
         user_id = payload.number
         user_text = payload.text

@@ -90,13 +90,21 @@ async function startBaileys() {
       console.log(`[Mensagem recebida] De: ${number}, Texto: ${text.substring(0, 50)}...`);
 
       try {
+        // Preparar headers
+        const headers = {
+          'Content-Type': 'application/json',
+        };
+        
+        // Adicionar API key apenas se configurada
+        const apiKey = process.env.BOT_API_KEY;
+        if (apiKey && apiKey.trim()) {
+          headers['X-API-KEY'] = apiKey;
+        }
+        
         // Enviar para o backend Python
         const response = await fetch(`${BOT_URL}${BOT_WHATSAPP_ENDPOINT}`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-API-KEY': process.env.BOT_API_KEY || '',
-          },
+          headers: headers,
           body: JSON.stringify({
             number: number,
             text: text,
@@ -116,14 +124,15 @@ async function startBaileys() {
         const reply = data.reply || '';
 
         if (reply && reply.trim()) {
-          // Enviar resposta de volta ao usuário
-          await sockGlobal.sendMessage(remoteJid, { text: reply });
+          // CORREÇÃO: usar sock diretamente (já está no escopo) ao invés de sockGlobal
+          await sock.sendMessage(remoteJid, { text: reply });
           console.log(`[Resposta enviada] Para: ${number}, Resposta: ${reply.substring(0, 50)}...`);
         } else {
           console.warn(`[Aviso] Resposta vazia do backend para número: ${number}`);
         }
       } catch (error) {
         console.error(`[Erro ao processar mensagem] De: ${number}, Erro: ${error.message}`);
+        console.error(`[DEBUG] Stack:`, error.stack);
       }
     }
   });
@@ -179,6 +188,12 @@ startBaileys()
     app.listen(PORT, () => {
       console.log(`HTTP server ON em http://localhost:${PORT}`);
       console.log(`Backend Python configurado em: ${BOT_URL}`);
+      const apiKey = process.env.BOT_API_KEY;
+      if (apiKey && apiKey.trim()) {
+        console.log(`[INFO] Autenticação habilitada: BOT_API_KEY configurada`);
+      } else {
+        console.log(`[INFO] Modo desenvolvimento: BOT_API_KEY não configurada (autenticação desabilitada)`);
+      }
     });
   })
   .catch((error) => {

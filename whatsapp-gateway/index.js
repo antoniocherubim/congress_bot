@@ -81,19 +81,31 @@ async function startBaileys() {
         continue;
       }
 
-      // Ignorar mensagens de grupos e broadcast (só aceitar JIDs que terminam com @s.whatsapp.net)
+      // Filtrar apenas conversas individuais (ignorar grupos e broadcasts)
       const remoteJid = msg.key?.remoteJid;
       if (!remoteJid) {
         console.log('[DEBUG] Mensagem ignorada: remoteJid vazio');
         continue;
       }
       
-      if (!remoteJid.endsWith('@s.whatsapp.net')) {
-        console.log(`[DEBUG] Mensagem ignorada: não é conversa individual (JID: ${remoteJid})`);
+      // Ignorar grupos (@g.us) e broadcasts (@broadcast)
+      if (remoteJid.endsWith('@g.us')) {
+        console.log(`[DEBUG] Mensagem ignorada: é um grupo (JID: ${remoteJid})`);
         continue;
       }
+      
+      if (remoteJid.endsWith('@broadcast')) {
+        console.log(`[DEBUG] Mensagem ignorada: é um broadcast (JID: ${remoteJid})`);
+        continue;
+      }
+      
+      // Aceitar conversas individuais (podem ter diferentes sufixos: @s.whatsapp.net, @lid, etc.)
+      // Qualquer JID que não seja grupo ou broadcast é considerado conversa individual
 
-      // Extrair número do JID (ex: "5541999380969@s.whatsapp.net" -> "5541999380969")
+      // Extrair número do JID (funciona com @s.whatsapp.net, @lid, etc.)
+      // Exemplos:
+      // "5541999380969@s.whatsapp.net" -> "5541999380969"
+      // "177077240250390@lid" -> "177077240250390"
       const number = remoteJid.split('@')[0];
 
       // Extrair texto da mensagem

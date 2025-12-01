@@ -57,17 +57,39 @@ async function startBaileys() {
 
   // Handler para mensagens recebidas
   sock.ev.on('messages.upsert', async (m) => {
+    // IMPORTANTE: Processar apenas mensagens novas (tipo 'notify')
+    // Ignorar sincronizações de mensagens antigas (tipo 'append')
+    if (m.type !== 'notify') {
+      return;
+    }
+
+    console.log('[DEBUG] messages.upsert acionado, tipo:', m.type);
     const messages = m.messages || [];
+    console.log(`[DEBUG] Total de mensagens recebidas: ${messages.length}`);
     
     for (const msg of messages) {
+      console.log('[DEBUG] Processando mensagem:', {
+        fromMe: msg.key?.fromMe,
+        remoteJid: msg.key?.remoteJid,
+        hasMessage: !!msg.message,
+        messageType: msg.message ? Object.keys(msg.message)[0] : 'none'
+      });
+
       // Ignorar mensagens enviadas por você mesmo
-      if (msg.key.fromMe) {
+      if (msg.key?.fromMe) {
+        console.log('[DEBUG] Mensagem ignorada: enviada pelo próprio bot');
         continue;
       }
 
       // Ignorar mensagens de grupos e broadcast (só aceitar JIDs que terminam com @s.whatsapp.net)
-      const remoteJid = msg.key.remoteJid;
-      if (!remoteJid || !remoteJid.endsWith('@s.whatsapp.net')) {
+      const remoteJid = msg.key?.remoteJid;
+      if (!remoteJid) {
+        console.log('[DEBUG] Mensagem ignorada: remoteJid vazio');
+        continue;
+      }
+      
+      if (!remoteJid.endsWith('@s.whatsapp.net')) {
+        console.log(`[DEBUG] Mensagem ignorada: não é conversa individual (JID: ${remoteJid})`);
         continue;
       }
 
@@ -84,6 +106,7 @@ async function startBaileys() {
 
       // Ignorar se não houver texto
       if (!text || !text.trim()) {
+        console.log('[DEBUG] Mensagem ignorada: sem texto (pode ser mídia ou outro tipo)');
         continue;
       }
 
@@ -135,6 +158,8 @@ async function startBaileys() {
         console.error(`[DEBUG] Stack:`, error.stack);
       }
     }
+    
+    console.log(`[DEBUG] Loop de processamento concluído. Mensagens processadas.`);
   });
 
   sockGlobal = sock;

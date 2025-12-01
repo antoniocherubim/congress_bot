@@ -19,6 +19,7 @@ class AppConfig:
     smtp_user: str = ""
     smtp_password: str = ""
     smtp_from: str = "inscricao@biosummit.com.br"
+    bot_api_key: str = ""
     system_prompt: str = (
         """
         Você é o assistente oficial da terceira edição do BioSummit (BioSummit 2026).
@@ -109,6 +110,7 @@ class AppConfig:
         smtp_user = os.getenv("SMTP_USER", "")
         smtp_password = os.getenv("SMTP_PASSWORD", "")
         smtp_from = os.getenv("SMTP_FROM", "inscricao@biosummit.com.br")
+        bot_api_key = os.getenv("BOT_API_KEY", "")
 
         return cls(
             openai_api_key=api_key,
@@ -119,5 +121,6 @@ class AppConfig:
             smtp_user=smtp_user,
             smtp_password=smtp_password,
             smtp_from=smtp_from,
+            bot_api_key=bot_api_key,
         )
 

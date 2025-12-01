@@ -32,6 +32,13 @@ Crie um arquivo `.env` na raiz do projeto (não versionado) com:
 ```
 OPENAI_API_KEY=sua-chave-aqui
 OPENAI_MODEL=gpt-4o-mini  # opcional, padrão é gpt-3o-mini
+BOT_API_KEY=uma-chave-secreta-aleatoria  # para autenticação com gateway WhatsApp
+DATABASE_URL=sqlite:///./biosummit.db
+SMTP_HOST=dev-log
+SMTP_PORT=587
+SMTP_USER=seu-usuario-smtp
+SMTP_PASSWORD=sua-senha-smtp
+SMTP_FROM=inscricao@biosummit.com.br
 ```
 
 O sistema carrega automaticamente as variáveis do arquivo `.env`. 
@@ -56,7 +63,7 @@ O servidor estará disponível em `http://localhost:8000`
 
 ### POST /chat
 
-Endpoint principal para enviar mensagens ao chatbot.
+Endpoint principal para enviar mensagens ao chatbot (testes HTTP diretos).
 
 **Request:**
 ```json
@@ -74,6 +81,40 @@ Endpoint principal para enviar mensagens ao chatbot.
   "turns": 1
 }
 ```
+
+### POST /whatsapp
+
+Endpoint para integração com gateway WhatsApp.
+
+**Request:**
+```json
+{
+  "number": "5541999380969",
+  "text": "Olá!"
+}
+```
+
+**Headers:**
+```
+X-API-KEY: uma-chave-secreta-aleatoria
+Content-Type: application/json
+```
+
+**Response:**
+```json
+{
+  "reply": "Olá! Como posso ajudar?"
+}
+```
+
+## Integração WhatsApp
+
+O projeto inclui um gateway WhatsApp em Node.js. Veja o arquivo [INTEGRATION.md](INTEGRATION.md) para instruções completas de integração.
+
+Resumo:
+1. Backend Python já está pronto para receber mensagens do gateway
+2. Gateway WhatsApp está em `whatsapp-gateway/`
+3. Configure a mesma `BOT_API_KEY` em ambos os serviços
 
 ## Documentação Interativa
 

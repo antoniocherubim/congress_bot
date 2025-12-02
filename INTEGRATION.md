@@ -243,4 +243,3 @@ curl -X POST http://localhost:3000/send-text \
 - [ ] Adicionar rate limiting
 - [ ] Adicionar suporte a grupos
 - [ ] Implementar webhook para status de mensagens
-

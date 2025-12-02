@@ -80,9 +80,41 @@ Verifica o status do gateway e conexão com WhatsApp.
 - `.env` - Variáveis de ambiente (não versionado)
 - `auth_info/` - Dados de autenticação do Baileys (não versionado)
 
+## Troubleshooting
+
+### Erro 401 (Sessão Expirada)
+
+Se você receber um erro `401 Unauthorized` ou `Connection Failure` com código 401, isso significa que a sessão do WhatsApp expirou ou foi invalidada.
+
+**Como resolver:**
+
+1. Pare o gateway (Ctrl+C)
+2. Delete a pasta `auth_info`:
+   ```bash
+   # Linux/Mac:
+   rm -rf whatsapp-gateway/auth_info
+   
+   # Windows:
+   rmdir /s whatsapp-gateway\auth_info
+   ```
+3. Ou use o script auxiliar (Linux/Mac):
+   ```bash
+   chmod +x reset-auth.sh
+   ./reset-auth.sh
+   ```
+4. Inicie o gateway novamente (`npm start`)
+5. Escaneie o novo QR Code que aparecerá
+
+### Outros Problemas
+
+- **Gateway não conecta ao WhatsApp**: Verifique se escaneou o QR Code corretamente
+- **Mensagens não são processadas**: Verifique os logs do gateway e do backend Python
+- **Erro ao chamar backend**: Verifique se o backend está rodando em `http://localhost:8000`
+
 ## Notas
 
 - O gateway só processa mensagens de texto de conversas individuais (não grupos)
 - Mensagens enviadas pelo próprio bot são ignoradas
-- O gateway reconecta automaticamente se a conexão cair
+- O gateway reconecta automaticamente se a conexão cair (exceto erros 401)
+- Conversas iniciadas por link direto (`@lid`) são suportadas
 

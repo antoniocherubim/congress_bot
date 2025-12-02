@@ -26,7 +26,6 @@ async function startBaileys() {
   const sock = makeWASocket({
     version,
     logger: P({ level: 'silent' }),
-    printQRInTerminal: true,
     auth: state,
     browser: ['BioSummit Bot', 'Chrome', '1.0.0'],
   });
@@ -40,13 +39,30 @@ async function startBaileys() {
     }
 
     if (connection === 'close') {
-      const shouldReconnect = (lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut);
+      const statusCode = lastDisconnect?.error?.output?.statusCode;
+      const isLoggedOut = statusCode === DisconnectReason.loggedOut;
+      const isUnauthorized = statusCode === 401;
       
-      console.log('Conexão fechada', lastDisconnect?.error);
+      console.log('Conexão fechada');
+      console.log(`Código de erro: ${statusCode}`);
       
-      if (shouldReconnect) {
-        console.log('Reconectando...');
-        startBaileys();
+      if (isUnauthorized || isLoggedOut) {
+        console.error('');
+        console.error('⚠️  ERRO: Sessão expirada ou invalidada (401/Logged Out)');
+        console.error('');
+        console.error('Para resolver:');
+        console.error('1. Pare o gateway (Ctrl+C)');
+        console.error('2. Delete a pasta auth_info:');
+        console.error('   rm -rf whatsapp-gateway/auth_info');
+        console.error('   (ou no Windows: rmdir /s whatsapp-gateway\\auth_info)');
+        console.error('3. Inicie o gateway novamente e escaneie o QR Code');
+        console.error('');
+        process.exit(1);
+      } else {
+        console.log('Reconectando automaticamente...');
+        setTimeout(() => {
+          startBaileys();
+        }, 3000);
       }
     } else if (connection === 'open') {
       console.log('✅ Conectado ao WhatsApp com sucesso!');

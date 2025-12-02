@@ -1,7 +1,8 @@
 import logging
 import smtplib
+import ssl
 from email.message import EmailMessage
-from smtplib import SMTPException
+from smtplib import SMTPException, SMTPServerDisconnected
 from ..config import AppConfig
 
 logger = logging.getLogger(__name__)
@@ -87,41 +88,107 @@ Equipe BioSummit
                     f"port={self._config.smtp_port}, from={self._config.smtp_from}"
                 )
                 
-                # Porta 465 usa SSL direto, porta 587 usa STARTTLS
+                # Criar contexto SSL padrão
+                ssl_context = ssl.create_default_context()
+                
+                email_sent = False
+                last_error = None
+                
+                # Tentar porta 465 primeiro (SSL direto)
                 if self._config.smtp_port == 465:
-                    # SSL/TLS direto (comum em GoDaddy, smtpout.secureserver.net)
-                    logger.debug("Usando SMTP_SSL (porta 465 - SSL direto)")
-                    with smtplib.SMTP_SSL(self._config.smtp_host, self._config.smtp_port) as server:
+                    logger.debug("Tentando porta 465 com SMTP_SSL (SSL direto)")
+                    try:
+                        server = smtplib.SMTP_SSL(
+                            self._config.smtp_host, 
+                            self._config.smtp_port,
+                            timeout=30,
+                            context=ssl_context
+                        )
+                        server.set_debuglevel(0)
+                        
                         if self._config.smtp_user:
-                            logger.debug(
-                                f"Autenticando SMTP: user={self._config.smtp_user}"
-                            )
+                            logger.debug(f"Autenticando SMTP: user={self._config.smtp_user}")
                             server.login(self._config.smtp_user, self._config.smtp_password)
+                        
                         logger.debug(f"Enviando mensagem SMTP para: {to_email}")
                         server.send_message(msg)
+                        server.quit()
+                        email_sent = True
+                        
+                    except (SMTPServerDisconnected, ConnectionError, Exception) as e:
+                        last_error = e
+                        logger.warning(
+                            f"Porta 465 falhou: {type(e).__name__}: {e}. "
+                            f"Tentando porta 587 com STARTTLS como fallback..."
+                        )
+                        # Tentar porta 587 como fallback
+                        try:
+                            logger.debug("Tentando porta 587 com STARTTLS como fallback")
+                            server = smtplib.SMTP(
+                                self._config.smtp_host, 
+                                587,
+                                timeout=30
+                            )
+                            server.set_debuglevel(0)
+                            
+                            if self._config.smtp_user:
+                                server.starttls(context=ssl_context)
+                                server.login(self._config.smtp_user, self._config.smtp_password)
+                            
+                            server.send_message(msg)
+                            server.quit()
+                            email_sent = True
+                            logger.info("Email enviado com sucesso usando porta 587 (fallback)")
+                            
+                        except Exception as e2:
+                            last_error = e2
+                            logger.error(f"Porta 587 também falhou: {type(e2).__name__}: {e2}")
+                
                 else:
                     # STARTTLS (porta 587 ou outras)
                     logger.debug("Usando SMTP com STARTTLS")
-                    with smtplib.SMTP(self._config.smtp_host, self._config.smtp_port) as server:
-                        if self._config.smtp_user:
-                            logger.debug(
-                                f"Autenticando SMTP: user={self._config.smtp_user}"
-                            )
-                            server.starttls()
-                            server.login(self._config.smtp_user, self._config.smtp_password)
-                        logger.debug(f"Enviando mensagem SMTP para: {to_email}")
-                        server.send_message(msg)
+                    server = smtplib.SMTP(
+                        self._config.smtp_host, 
+                        self._config.smtp_port,
+                        timeout=30
+                    )
+                    server.set_debuglevel(0)
+                    
+                    if self._config.smtp_user:
+                        logger.debug(f"Autenticando SMTP: user={self._config.smtp_user}")
+                        server.starttls(context=ssl_context)
+                        server.login(self._config.smtp_user, self._config.smtp_password)
+                    
+                    logger.debug(f"Enviando mensagem SMTP para: {to_email}")
+                    server.send_message(msg)
+                    server.quit()
+                    email_sent = True
+                
+                if not email_sent and last_error:
+                    raise last_error
                 
                 logger.info(
                     f"✅ E-mail REAL enviado com sucesso via SMTP: to={to_email}, "
                     f"host={self._config.smtp_host}, port={self._config.smtp_port}"
                 )
             except SMTPException as e:
-                logger.error(
-                    f"Erro SMTP ao enviar e-mail: to={to_email}, "
-                    f"error={type(e).__name__}: {e}",
-                    exc_info=True,
-                )
+                error_type = type(e).__name__
+                error_msg = str(e)
+                
+                # Mensagem mais detalhada para erros comuns
+                if "Connection unexpectedly closed" in error_msg or isinstance(e, SMTPServerDisconnected):
+                    logger.error(
+                        f"Erro SMTP: Conexão fechada durante autenticação. "
+                        f"Verifique: host={self._config.smtp_host}, port={self._config.smtp_port}, "
+                        f"user={self._config.smtp_user}, "
+                        f"Possíveis causas: credenciais incorretas, porta errada, ou servidor bloqueando conexão."
+                    )
+                else:
+                    logger.error(
+                        f"Erro SMTP ao enviar e-mail: to={to_email}, "
+                        f"error={error_type}: {error_msg}",
+                        exc_info=True,
+                    )
                 raise
             except Exception as e:
                 logger.error(

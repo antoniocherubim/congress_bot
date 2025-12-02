@@ -4,7 +4,7 @@ from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from .session_manager import ConversationState
 from .registration_state import RegistrationStep, RegistrationData
-from .normalizers import normalize_phone, normalize_city_state, normalize_profile, UF_MAP
+from .normalizers import normalize_phone, normalize_cpf, normalize_city_state, normalize_profile, UF_MAP
 from ..storage.repository import ParticipantRepository
 from ..infra.email_service import EmailService
 
@@ -110,10 +110,10 @@ class RegistrationManager:
                     f"E-mail coletado: user_id={state.user_id}, "
                     f"email={email}"
                 )
-                state.registration_step = RegistrationStep.ASKING_PHONE
+                state.registration_step = RegistrationStep.ASKING_CPF
                 return (
                     state,
-                    "Ótimo! Agora, por favor, me informe seu telefone com DDD.",
+                    "Agora, por favor, me informe seu CPF (apenas números).",
                 )
             logger.warning(
                 f"E-mail inválido recebido: user_id={state.user_id}, "
@@ -123,6 +123,55 @@ class RegistrationManager:
                 state,
                 "E-mail inválido. Por favor, informe um e-mail válido (exemplo: seu.nome@email.com).",
             )
+
+        # 3.5. ASKING_CPF: coletar e validar CPF
+        if step == RegistrationStep.ASKING_CPF:
+            normalized_cpf = normalize_cpf(user_text)
+            if not normalized_cpf:
+                logger.warning(
+                    f"CPF inválido recebido: user_id={state.user_id}, "
+                    f"cpf_input={user_text[:30]}"
+                )
+                return (
+                    state,
+                    "CPF inválido. Por favor, informe seu CPF com 11 dígitos (apenas números ou no formato 123.456.789-10).",
+                )
+            
+            # Verificar se CPF já está cadastrado
+            db_session: Session = self._db_session_factory()
+            try:
+                repo = ParticipantRepository(db_session)
+                existing = repo.find_by_cpf(normalized_cpf)
+                
+                if existing:
+                    logger.warning(
+                        f"Tentativa de inscrição com CPF já cadastrado: "
+                        f"user_id={state.user_id}, cpf={normalized_cpf}, "
+                        f"existing_name={existing.full_name}"
+                    )
+                    # Resetar o fluxo de inscrição
+                    state.registration_step = RegistrationStep.IDLE
+                    state.registration_data = RegistrationData()
+                    return (
+                        state,
+                        f"Este CPF já está cadastrado no sistema.\n"
+                        f"Nome cadastrado: {existing.full_name}\n"
+                        f"E-mail: {existing.email}\n\n"
+                        f"Se você acredita que isso é um erro, entre em contato com a organização do evento.",
+                    )
+                
+                # CPF válido e não cadastrado
+                data.cpf = normalized_cpf
+                logger.debug(
+                    f"CPF coletado e validado: user_id={state.user_id}, cpf={normalized_cpf}"
+                )
+                state.registration_step = RegistrationStep.ASKING_PHONE
+                return (
+                    state,
+                    "Ótimo! Agora, por favor, me informe seu telefone com DDD.",
+                )
+            finally:
+                db_session.close()
 
         # 4. ASKING_PHONE: coletar telefone
         if step == RegistrationStep.ASKING_PHONE:
@@ -257,6 +306,7 @@ class RegistrationManager:
 
 Nome: {data.full_name}
 E-mail: {data.email}
+CPF: {data.cpf or 'Não informado'}
 Telefone: {data.phone or 'Não informado'}
 Cidade/UF: {data.city or 'Não informado'}/{data.state or 'Não informado'}
 Perfil: {data.profile or 'Não informado'}
@@ -272,16 +322,38 @@ Está tudo correto? Responda 'sim' para confirmar ou 'não' para reiniciar o cad
             if response_lower.startswith("sim"):
                 logger.info(
                     f"Inscrição será confirmada: user_id={state.user_id}, "
-                    f"email={data.email}"
+                    f"email={data.email}, cpf={data.cpf}"
                 )
                 
-                # Salvar no banco de dados
+                # Verificar novamente se CPF já está cadastrado (verificação dupla)
                 db_session: Session = self._db_session_factory()
                 try:
                     repo = ParticipantRepository(db_session)
+                    
+                    if data.cpf:
+                        existing = repo.find_by_cpf(data.cpf)
+                        if existing:
+                            logger.warning(
+                                f"CPF já cadastrado no momento da confirmação: "
+                                f"user_id={state.user_id}, cpf={data.cpf}, "
+                                f"existing_name={existing.full_name}"
+                            )
+                            # Resetar o fluxo
+                            state.registration_step = RegistrationStep.IDLE
+                            state.registration_data = RegistrationData()
+                            return (
+                                state,
+                                f"Este CPF já está cadastrado no sistema.\n"
+                                f"Nome cadastrado: {existing.full_name}\n"
+                                f"E-mail: {existing.email}\n\n"
+                                f"Se você acredita que isso é um erro, entre em contato com a organização do evento.",
+                            )
+                    
+                    # Salvar no banco de dados
                     participant = repo.create_participant(
                         full_name=data.full_name or "",
                         email=data.email or "",
+                        cpf=data.cpf or "",
                         phone=data.phone,
                         city=data.city,
                         state=data.state,
@@ -329,14 +401,57 @@ Está tudo correto? Responda 'sim' para confirmar ou 'não' para reiniciar o cad
                         "Você receberá um e-mail de confirmação em breve.\n"
                         "Se precisar de mais alguma coisa sobre o BioSummit 2026, é só me chamar.",
                     )
-                except (IntegrityError, SQLAlchemyError) as db_error:
+                except IntegrityError as db_error:
+                    error_msg = str(db_error).lower()
+                    
+                    # Verificar se é erro de CPF duplicado
+                    if "cpf" in error_msg or "unique constraint" in error_msg or "duplicate" in error_msg:
+                        logger.warning(
+                            f"CPF duplicado detectado via IntegrityError: user_id={state.user_id}, "
+                            f"cpf={data.cpf}, error={type(db_error).__name__}"
+                        )
+                        db_session.rollback()
+                        
+                        # Resetar o fluxo e informar usuário
+                        state.registration_step = RegistrationStep.IDLE
+                        state.registration_data = RegistrationData()
+                        
+                        # Tentar buscar o participante existente para mostrar informações
+                        try:
+                            existing = repo.find_by_cpf(data.cpf or "")
+                            if existing:
+                                return (
+                                    state,
+                                    f"Este CPF já está cadastrado no sistema.\n"
+                                    f"Nome cadastrado: {existing.full_name}\n"
+                                    f"E-mail: {existing.email}\n\n"
+                                    f"Se você acredita que isso é um erro, entre em contato com a organização do evento.",
+                                )
+                        except:
+                            pass
+                        
+                        return (
+                            state,
+                            "Este CPF já está cadastrado no sistema. "
+                            "Se você acredita que isso é um erro, entre em contato com a organização do evento.",
+                        )
+                    
+                    logger.error(
+                        f"Erro de integridade ao persistir participante no banco: "
+                        f"user_id={state.user_id}, email={data.email}, cpf={data.cpf}, "
+                        f"error={type(db_error).__name__}: {db_error}",
+                        exc_info=True,
+                    )
+                    db_session.rollback()
+                    raise
+                except SQLAlchemyError as db_error:
                     logger.error(
                         f"Erro ao persistir participante no banco: "
                         f"user_id={state.user_id}, email={data.email}, "
                         f"error={type(db_error).__name__}: {db_error}",
                         exc_info=True,
                     )
-                    # Relançar para que o engine possa tratar
+                    db_session.rollback()
                     raise
                 except AssertionError as assert_error:
                     logger.error(

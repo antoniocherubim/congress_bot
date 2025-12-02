@@ -15,10 +15,17 @@ class ParticipantRepository:
     def __init__(self, db: Session) -> None:
         self._db = db
 
+    def find_by_cpf(self, cpf: str) -> Optional[Participant]:
+        """
+        Busca um participante pelo CPF.
+        """
+        return self._db.query(Participant).filter(Participant.cpf == cpf).first()
+
     def create_participant(
         self,
         full_name: str,
         email: str,
+        cpf: str,
         phone: Optional[str] = None,
         city: Optional[str] = None,
         state: Optional[str] = None,
@@ -28,7 +35,7 @@ class ParticipantRepository:
         Cria um novo participante no banco de dados.
         """
         logger.debug(
-            f"Criando participante: name={full_name}, email={email}, "
+            f"Criando participante: name={full_name}, email={email}, cpf={cpf}, "
             f"city={city}, state={state}, profile={profile}"
         )
         
@@ -36,6 +43,7 @@ class ParticipantRepository:
             participant = Participant(
                 full_name=full_name,
                 email=email,
+                cpf=cpf,
                 phone=phone,
                 city=city,
                 state=state,

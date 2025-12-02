@@ -23,6 +23,9 @@ wheels/
 .installed.cfg
 *.egg
 projecoes.html
+biosummit.db
+check_email_config.py
+
 
 # Environment variables
 .env

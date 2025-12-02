@@ -26,6 +26,48 @@ def strip_accents(text: str) -> str:
     )
 
 
+def normalize_cpf(raw: str) -> Optional[str]:
+    """
+    Normaliza CPF removendo caracteres não numéricos.
+    Retorna apenas os 11 dígitos ou None se inválido.
+    """
+    # Remove tudo que não é dígito
+    digits = re.sub(r'\D', '', raw)
+    
+    # Deve ter exatamente 11 dígitos
+    if len(digits) != 11:
+        return None
+    
+    # Validação básica: não pode ser todos os dígitos iguais
+    if len(set(digits)) == 1:
+        return None
+    
+    return digits
+
+
+def normalize_cpf(raw: str) -> Optional[str]:
+    """
+    Normaliza CPF removendo caracteres não numéricos.
+    Retorna apenas os 11 dígitos ou None se inválido.
+    
+    Aceita formatos como:
+    - "123.456.789-10" → "12345678910"
+    - "12345678910" → "12345678910"
+    """
+    # Remove tudo que não é dígito
+    digits = re.sub(r'\D', '', raw)
+    
+    # Deve ter exatamente 11 dígitos
+    if len(digits) != 11:
+        return None
+    
+    # Validação básica: não pode ser todos os dígitos iguais (ex: 111.111.111-11)
+    if len(set(digits)) == 1:
+        return None
+    
+    return digits
+
+
 def normalize_phone(raw: str) -> Optional[str]:
     """
     Extrai dígitos de um telefone brasileiro e formata como +55 DD XXXXX-XXXX.

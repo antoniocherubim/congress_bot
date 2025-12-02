@@ -10,6 +10,7 @@ class RegistrationStep(str, Enum):
     IDLE = "idle"
     ASKING_NAME = "asking_name"
     ASKING_EMAIL = "asking_email"
+    ASKING_CPF = "asking_cpf"
     ASKING_PHONE = "asking_phone"
     ASKING_CITY = "asking_city"
     ASKING_STATE = "asking_state"
@@ -25,6 +26,7 @@ class RegistrationData:
     """
     full_name: Optional[str] = None
     email: Optional[str] = None
+    cpf: Optional[str] = None
     phone: Optional[str] = None
     city: Optional[str] = None
     state: Optional[str] = None

@@ -77,6 +77,7 @@ class AppConfig:
         - Responda sempre de forma clara, objetiva e educada.
         - Nunca invente informações.
         - Sempre ofereça encaminhamento para a organização quando for algo muito específico.
+        - IMPORTANTE: Sempre responda no mesmo idioma em que a mensagem foi escrita. Se o usuário escrever em inglês, responda em inglês. Se escrever em espanhol, responda em espanhol. Se escrever em português, responda em português. Detecte automaticamente o idioma da mensagem e mantenha a conversa nesse idioma.
 
         ### Pode responder com segurança perguntas como:
         - Quando e onde será o BioSummit 2026?

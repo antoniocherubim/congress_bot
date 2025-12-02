@@ -5,6 +5,7 @@ const {
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
   DisconnectReason,
+  downloadMediaMessage,
 } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
 const P = require('pino');
@@ -124,17 +125,90 @@ async function startBaileys() {
       // "177077240250390@lid" -> "177077240250390"
       const number = remoteJid.split('@')[0];
 
-      // Extrair texto da mensagem
+      // Extrair texto da mensagem ou processar áudio
       let text = '';
+      
+      // Verificar se é mensagem de texto
       if (msg.message?.conversation) {
         text = msg.message.conversation;
       } else if (msg.message?.extendedTextMessage?.text) {
         text = msg.message.extendedTextMessage.text;
       }
+      // Verificar se é mensagem de áudio
+      else if (msg.message?.audioMessage) {
+        try {
+          console.log(`[Áudio recebido] De: ${number}, processando...`);
+          
+          // Baixar o áudio do WhatsApp
+          const mediaBuffer = await downloadMediaMessage(
+            msg,
+            'buffer',
+            {},
+            { 
+              logger: P({ level: 'silent' }),
+              reuploadRequest: sock.updateMediaMessage
+            }
+          );
+          
+          // Garantir que seja um Buffer
+          const buffer = Buffer.isBuffer(mediaBuffer) 
+            ? mediaBuffer 
+            : Buffer.from(mediaBuffer);
+          
+          // Converter para base64
+          const audioBase64 = buffer.toString('base64');
+          
+          // Enviar para o backend Python para transcrever
+          const headers = {
+            'Content-Type': 'application/json',
+          };
+          
+          const apiKey = process.env.BOT_API_KEY;
+          if (apiKey && apiKey.trim()) {
+            headers['X-API-KEY'] = apiKey;
+          }
+          
+          const transcribeResponse = await fetch(`${BOT_URL}/transcribe-audio`, {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify({
+              audio_base64: audioBase64,
+            }),
+          });
+          
+          if (!transcribeResponse.ok) {
+            console.error(`[Erro ao transcrever áudio] Status: ${transcribeResponse.status}`);
+            // Enviar mensagem de erro ao usuário
+            await sock.sendMessage(remoteJid, { 
+              text: 'Desculpe, não consegui processar o áudio. Por favor, tente enviar uma mensagem de texto.' 
+            });
+            continue;
+          }
+          
+          const transcribeData = await transcribeResponse.json();
+          text = transcribeData.text || '';
+          
+          if (!text || !text.trim()) {
+            console.warn(`[Aviso] Transcrição vazia do áudio para número: ${number}`);
+            await sock.sendMessage(remoteJid, { 
+              text: 'Não consegui entender o áudio. Por favor, tente novamente ou envie uma mensagem de texto.' 
+            });
+            continue;
+          }
+          
+          console.log(`[Áudio transcrito] De: ${number}, Texto: ${text.substring(0, 50)}...`);
+        } catch (error) {
+          console.error(`[Erro ao processar áudio] De: ${number}, Erro: ${error.message}`);
+          await sock.sendMessage(remoteJid, { 
+            text: 'Desculpe, ocorreu um erro ao processar seu áudio. Por favor, tente enviar uma mensagem de texto.' 
+          });
+          continue;
+        }
+      }
 
-      // Ignorar se não houver texto
+      // Ignorar se não houver texto (nem texto direto, nem áudio transcrito)
       if (!text || !text.trim()) {
-        console.log('[DEBUG] Mensagem ignorada: sem texto (pode ser mídia ou outro tipo)');
+        console.log('[DEBUG] Mensagem ignorada: sem texto (pode ser outro tipo de mídia)');
         continue;
       }
 

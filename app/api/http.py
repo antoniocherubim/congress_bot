@@ -1,7 +1,10 @@
 import logging
+import base64
+import tempfile
 from fastapi import FastAPI, HTTPException, Header
 from typing import Optional
 from pydantic import BaseModel
+from openai import OpenAI
 from ..config import AppConfig
 from ..core.engine import ChatbotEngine
 
@@ -26,6 +29,14 @@ class WhatsAppMessage(BaseModel):
 
 class WhatsAppResponse(BaseModel):
     reply: str
+
+
+class AudioTranscribeRequest(BaseModel):
+    audio_base64: str
+
+
+class AudioTranscribeResponse(BaseModel):
+    text: str
 
 
 def create_app() -> FastAPI:
@@ -148,6 +159,74 @@ def create_app() -> FastAPI:
             raise HTTPException(
                 status_code=500,
                 detail="Erro interno ao processar sua mensagem. Tente novamente mais tarde.",
+            )
+
+    @app.post("/transcribe-audio", response_model=AudioTranscribeResponse)
+    def transcribe_audio(
+        payload: AudioTranscribeRequest,
+        x_api_key: Optional[str] = Header(default=None, alias="X-API-KEY"),
+    ) -> AudioTranscribeResponse:
+        """
+        Endpoint para transcrever áudio usando OpenAI Whisper.
+        """
+        # Autenticação simples via header X-API-KEY
+        expected_key = config.bot_api_key or ""
+        if expected_key and expected_key.strip():
+            if x_api_key != expected_key:
+                logger.warning(
+                    f"Tentativa de acesso não autorizado ao endpoint /transcribe-audio: "
+                    f"key_fornecida={'***' if x_api_key else 'nenhuma'}"
+                )
+                raise HTTPException(status_code=401, detail="Invalid API key")
+        else:
+            logger.debug("BOT_API_KEY não configurada, aceitando requisição sem autenticação (modo desenvolvimento)")
+
+        try:
+            # Decodificar áudio base64
+            audio_data = base64.b64decode(payload.audio_base64)
+            
+            logger.info(f"Recebido áudio para transcrição, tamanho: {len(audio_data)} bytes")
+            
+            # Criar arquivo temporário
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.ogg') as temp_file:
+                temp_file.write(audio_data)
+                temp_file_path = temp_file.name
+            
+            try:
+                # Criar cliente OpenAI
+                openai_client = OpenAI(api_key=config.openai_api_key)
+                
+                # Transcrever usando Whisper (detecção automática de idioma)
+                with open(temp_file_path, 'rb') as audio_file:
+                    transcript = openai_client.audio.transcriptions.create(
+                        model="whisper-1",
+                        file=audio_file,
+                        # Não especificar language para detecção automática
+                    )
+                
+                text = transcript.text.strip()
+                
+                logger.info(f"Áudio transcrito com sucesso: {len(text)} caracteres")
+                logger.debug(f"Transcrição: {text[:100]}...")
+                
+                return AudioTranscribeResponse(text=text)
+                
+            finally:
+                # Limpar arquivo temporário
+                import os
+                try:
+                    os.unlink(temp_file_path)
+                except:
+                    pass
+                    
+        except Exception as e:
+            logger.error(
+                f"Erro ao transcrever áudio: {type(e).__name__}: {e}",
+                exc_info=True,
+            )
+            raise HTTPException(
+                status_code=500,
+                detail="Erro ao processar o áudio. Tente novamente.",
             )
 
     return app

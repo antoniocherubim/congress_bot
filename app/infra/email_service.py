@@ -86,18 +86,35 @@ Equipe BioSummit
                     f"Iniciando conexão SMTP: host={self._config.smtp_host}, "
                     f"port={self._config.smtp_port}, from={self._config.smtp_from}"
                 )
-                with smtplib.SMTP(self._config.smtp_host, self._config.smtp_port) as server:
-                    if self._config.smtp_user:
-                        logger.debug(
-                            f"Autenticando SMTP: user={self._config.smtp_user}"
-                        )
-                        server.starttls()
-                        server.login(self._config.smtp_user, self._config.smtp_password)
-                    logger.debug(f"Enviando mensagem SMTP para: {to_email}")
-                    server.send_message(msg)
+                
+                # Porta 465 usa SSL direto, porta 587 usa STARTTLS
+                if self._config.smtp_port == 465:
+                    # SSL/TLS direto (comum em GoDaddy, smtpout.secureserver.net)
+                    logger.debug("Usando SMTP_SSL (porta 465 - SSL direto)")
+                    with smtplib.SMTP_SSL(self._config.smtp_host, self._config.smtp_port) as server:
+                        if self._config.smtp_user:
+                            logger.debug(
+                                f"Autenticando SMTP: user={self._config.smtp_user}"
+                            )
+                            server.login(self._config.smtp_user, self._config.smtp_password)
+                        logger.debug(f"Enviando mensagem SMTP para: {to_email}")
+                        server.send_message(msg)
+                else:
+                    # STARTTLS (porta 587 ou outras)
+                    logger.debug("Usando SMTP com STARTTLS")
+                    with smtplib.SMTP(self._config.smtp_host, self._config.smtp_port) as server:
+                        if self._config.smtp_user:
+                            logger.debug(
+                                f"Autenticando SMTP: user={self._config.smtp_user}"
+                            )
+                            server.starttls()
+                            server.login(self._config.smtp_user, self._config.smtp_password)
+                        logger.debug(f"Enviando mensagem SMTP para: {to_email}")
+                        server.send_message(msg)
+                
                 logger.info(
                     f"✅ E-mail REAL enviado com sucesso via SMTP: to={to_email}, "
-                    f"host={self._config.smtp_host}"
+                    f"host={self._config.smtp_host}, port={self._config.smtp_port}"
                 )
             except SMTPException as e:
                 logger.error(

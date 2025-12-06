@@ -130,20 +130,64 @@ def normalize_city_state(raw: str) -> Tuple[Optional[str], Optional[str]]:
             uf = state_clean
         else:
             # Mapeamentos manuais para estados com nomes completos
+            # Como state_clean já passa por strip_accents, apenas versões sem acento são necessárias
+            # Cobre todos os 27 estados brasileiros (26 estados + 1 Distrito Federal)
             state_mappings = {
-                "PARANA": "PR",
-                "PARANÁ": "PR",
-                "SAO PAULO": "SP",
-                "SÃO PAULO": "SP",
-                "SANTA CATARINA": "SC",
-                "RIO GRANDE DO SUL": "RS",
-                "RIO GRANDE DO NORTE": "RN",
-                "MINAS GERAIS": "MG",
-                "MATO GROSSO": "MT",
-                "MATO GROSSO DO SUL": "MS",
-                "ESPIRITO SANTO": "ES",
-                "ESPÍRITO SANTO": "ES",
+                # Acre
+                "ACRE": "AC",
+                # Alagoas
+                "ALAGOAS": "AL",
+                # Amapá
+                "AMAPA": "AP",
+                # Amazonas
+                "AMAZONAS": "AM",
+                # Bahia
+                "BAHIA": "BA",
+                # Ceará
+                "CEARA": "CE",
+                # Distrito Federal
                 "DISTRITO FEDERAL": "DF",
+                "DF": "DF",
+                # Espírito Santo
+                "ESPIRITO SANTO": "ES",
+                # Goiás
+                "GOIAS": "GO",
+                # Maranhão
+                "MARANHAO": "MA",
+                # Mato Grosso
+                "MATO GROSSO": "MT",
+                # Mato Grosso do Sul
+                "MATO GROSSO DO SUL": "MS",
+                # Minas Gerais
+                "MINAS GERAIS": "MG",
+                # Pará
+                "PARA": "PA",
+                # Paraíba
+                "PARAIBA": "PB",
+                # Paraná
+                "PARANA": "PR",
+                # Pernambuco
+                "PERNAMBUCO": "PE",
+                # Piauí
+                "PIAUI": "PI",
+                # Rio de Janeiro
+                "RIO DE JANEIRO": "RJ",
+                # Rio Grande do Norte
+                "RIO GRANDE DO NORTE": "RN",
+                # Rio Grande do Sul
+                "RIO GRANDE DO SUL": "RS",
+                # Rondônia
+                "RONDONIA": "RO",
+                # Roraima
+                "RORAIMA": "RR",
+                # Santa Catarina
+                "SANTA CATARINA": "SC",
+                # São Paulo
+                "SAO PAULO": "SP",
+                # Sergipe
+                "SERGIPE": "SE",
+                # Tocantins
+                "TOCANTINS": "TO",
             }
             
             uf = None

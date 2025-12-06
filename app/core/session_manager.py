@@ -39,6 +39,35 @@ class ConversationState:
             messages.append(turn.assistant_message)
         return messages
 
+    def get_registration_summary(self) -> str:
+        """
+        Retorna um resumo dos dados de inscrição já coletados.
+        Usado para fornecer contexto ao modelo de linguagem.
+        """
+        data = self.registration_data
+        parts = []
+        
+        if data.full_name:
+            parts.append(f"Nome: {data.full_name}")
+        if data.email:
+            parts.append(f"E-mail: {data.email}")
+        if data.cpf:
+            parts.append(f"CPF: {data.cpf}")
+        if data.phone:
+            parts.append(f"Telefone: {data.phone}")
+        if data.city:
+            city_state = f"{data.city}"
+            if data.state:
+                city_state += f"/{data.state}"
+            parts.append(f"Cidade/UF: {city_state}")
+        if data.profile:
+            parts.append(f"Perfil: {data.profile}")
+        
+        if not parts:
+            return "Nenhum dado coletado ainda."
+        
+        return "; ".join(parts)
+
 
 class InMemorySessionManager:
     """

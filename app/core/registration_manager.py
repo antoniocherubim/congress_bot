@@ -1,5 +1,6 @@
 import logging
-from typing import Tuple
+from typing import Optional
+from dataclasses import dataclass
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from .session_manager import ConversationState
@@ -9,6 +10,23 @@ from ..storage.repository import ParticipantRepository
 from ..infra.email_service import EmailService
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class RegistrationFlowHint:
+    """
+    Representa o estado lógico do fluxo de inscrição após processar uma mensagem.
+    Não é a resposta final ao usuário, é um "guia" para a camada de linguagem.
+    """
+    state: ConversationState
+    # Mensagem de guia do fluxo, ex: "Estamos pedindo o e-mail", "Inscrição concluída", etc.
+    instruction: Optional[str]
+    # Se a mensagem atual aparentemente forneceu o valor esperado
+    field_captured: bool
+    # Nome do campo esperado (nome, email, telefone, cidade_uf, perfil, etc.)
+    current_field: Optional[str]
+    # Se o fluxo de inscrição ainda está ativo (ou se já concluiu)
+    in_registration_flow: bool
 
 
 class RegistrationManager:
@@ -55,16 +73,33 @@ class RegistrationManager:
         """
         return "@" in email and "." in email.split("@")[1]
 
+    def _create_hint(
+        self,
+        state: ConversationState,
+        instruction: Optional[str],
+        field_captured: bool,
+        current_field: Optional[str],
+        in_registration_flow: bool,
+    ) -> RegistrationFlowHint:
+        """Método auxiliar para criar um RegistrationFlowHint."""
+        return RegistrationFlowHint(
+            state=state,
+            instruction=instruction,
+            field_captured=field_captured,
+            current_field=current_field,
+            in_registration_flow=in_registration_flow,
+        )
+
     def handle_message(
         self,
         state: ConversationState,
         user_text: str,
-    ) -> Tuple[ConversationState, str]:
+    ) -> RegistrationFlowHint:
         """
         Processa mensagem do usuário no contexto do fluxo de inscrição.
         
-        Retorna (estado_atualizado, resposta_do_bot).
-        Se resposta_do_bot for vazia, significa que não é parte do fluxo de inscrição.
+        Retorna RegistrationFlowHint com o estado atualizado e instruções
+        para a camada de linguagem gerar a resposta final.
         """
         step = state.registration_step
         data = state.registration_data
@@ -76,12 +111,20 @@ class RegistrationManager:
                     f"Usuário iniciou fluxo de inscrição: user_id={state.user_id}"
                 )
                 state.registration_step = RegistrationStep.ASKING_NAME
-                return (
-                    state,
-                    "Perfeito! Vamos fazer sua inscrição no BioSummit 2026.\n"
-                    "Para começar, por favor, me informe seu nome completo.",
+                return self._create_hint(
+                    state=state,
+                    instruction="O usuário iniciou o fluxo de inscrição. Estamos coletando o nome completo do participante.",
+                    field_captured=False,
+                    current_field="nome",
+                    in_registration_flow=True,
                 )
-            return (state, "")
+            return self._create_hint(
+                state=state,
+                instruction=None,
+                field_captured=False,
+                current_field=None,
+                in_registration_flow=False,
+            )
 
         # 2. ASKING_NAME: coletar nome completo
         if step == RegistrationStep.ASKING_NAME:
@@ -92,13 +135,19 @@ class RegistrationManager:
                     f"name={data.full_name}"
                 )
                 state.registration_step = RegistrationStep.ASKING_EMAIL
-                return (
-                    state,
-                    "Agora, por favor, me informe seu e-mail principal.",
+                return self._create_hint(
+                    state=state,
+                    instruction="Nome confirmado. Agora precisamos do e-mail para contato.",
+                    field_captured=True,
+                    current_field="email",
+                    in_registration_flow=True,
                 )
-            return (
-                state,
-                "Por favor, informe seu nome completo para continuarmos.",
+            return self._create_hint(
+                state=state,
+                instruction="Faltam dados para concluir a inscrição. No momento esperamos o nome completo do participante.",
+                field_captured=False,
+                current_field="nome",
+                in_registration_flow=True,
             )
 
         # 3. ASKING_EMAIL: coletar e validar e-mail
@@ -111,17 +160,23 @@ class RegistrationManager:
                     f"email={email}"
                 )
                 state.registration_step = RegistrationStep.ASKING_CPF
-                return (
-                    state,
-                    "Agora, por favor, me informe seu CPF (apenas números).",
+                return self._create_hint(
+                    state=state,
+                    instruction="E-mail confirmado. Agora precisamos do CPF (apenas números, 11 dígitos).",
+                    field_captured=True,
+                    current_field="cpf",
+                    in_registration_flow=True,
                 )
             logger.warning(
                 f"E-mail inválido recebido: user_id={state.user_id}, "
                 f"email_input={email[:50]}"
             )
-            return (
-                state,
-                "E-mail inválido. Por favor, informe um e-mail válido (exemplo: seu.nome@email.com).",
+            return self._create_hint(
+                state=state,
+                instruction="Faltam dados para concluir a inscrição. No momento esperamos um e-mail válido para contato.",
+                field_captured=False,
+                current_field="email",
+                in_registration_flow=True,
             )
 
         # 3.5. ASKING_CPF: coletar e validar CPF
@@ -132,9 +187,12 @@ class RegistrationManager:
                     f"CPF inválido recebido: user_id={state.user_id}, "
                     f"cpf_input={user_text[:30]}"
                 )
-                return (
-                    state,
-                    "CPF inválido. Por favor, informe seu CPF com 11 dígitos (apenas números ou no formato 123.456.789-10).",
+                return self._create_hint(
+                    state=state,
+                    instruction="Faltam dados para concluir a inscrição. No momento esperamos um CPF válido com 11 dígitos (apenas números ou no formato 123.456.789-10).",
+                    field_captured=False,
+                    current_field="cpf",
+                    in_registration_flow=True,
                 )
             
             # Verificar se CPF já está cadastrado
@@ -152,12 +210,12 @@ class RegistrationManager:
                     # Resetar o fluxo de inscrição
                     state.registration_step = RegistrationStep.IDLE
                     state.registration_data = RegistrationData()
-                    return (
-                        state,
-                        f"Este CPF já está cadastrado no sistema.\n"
-                        f"Nome cadastrado: {existing.full_name}\n"
-                        f"E-mail: {existing.email}\n\n"
-                        f"Se você acredita que isso é um erro, entre em contato com a organização do evento.",
+                    return self._create_hint(
+                        state=state,
+                        instruction=f"Este CPF já está cadastrado no sistema. Nome cadastrado: {existing.full_name}. E-mail: {existing.email}. Se você acredita que isso é um erro, entre em contato com a organização do evento.",
+                        field_captured=False,
+                        current_field=None,
+                        in_registration_flow=False,
                     )
                 
                 # CPF válido e não cadastrado
@@ -166,9 +224,12 @@ class RegistrationManager:
                     f"CPF coletado e validado: user_id={state.user_id}, cpf={normalized_cpf}"
                 )
                 state.registration_step = RegistrationStep.ASKING_PHONE
-                return (
-                    state,
-                    "Ótimo! Agora, por favor, me informe seu telefone com DDD.",
+                return self._create_hint(
+                    state=state,
+                    instruction="CPF confirmado. Agora precisamos do telefone com DDD para contato.",
+                    field_captured=True,
+                    current_field="telefone",
+                    in_registration_flow=True,
                 )
             finally:
                 db_session.close()
@@ -181,10 +242,12 @@ class RegistrationManager:
                     f"Telefone inválido recebido: user_id={state.user_id}, "
                     f"phone_input={user_text[:30]}"
                 )
-                return (
-                    state,
-                    "Não consegui entender seu telefone. "
-                    "Envie no formato com DDD, por exemplo: 41999999999.",
+                return self._create_hint(
+                    state=state,
+                    instruction="Faltam dados para concluir a inscrição. No momento esperamos um telefone válido com DDD (formato: 41999999999).",
+                    field_captured=False,
+                    current_field="telefone",
+                    in_registration_flow=True,
                 )
             data.phone = parsed_phone
             logger.debug(
@@ -192,17 +255,23 @@ class RegistrationManager:
                 f"phone={parsed_phone}"
             )
             state.registration_step = RegistrationStep.ASKING_CITY
-            return (
-                state,
-                "Agora, por favor, me informe sua cidade.",
+            return self._create_hint(
+                state=state,
+                instruction="Telefone confirmado. Agora precisamos da cidade onde você mora.",
+                field_captured=True,
+                current_field="cidade",
+                in_registration_flow=True,
             )
 
         # 5. ASKING_CITY: coletar cidade (pode vir com UF junto)
         if step == RegistrationStep.ASKING_CITY:
             if not user_text.strip():
-                return (
-                    state,
-                    "Por favor, informe sua cidade para continuarmos.",
+                return self._create_hint(
+                    state=state,
+                    instruction="Faltam dados para concluir a inscrição. No momento esperamos o nome da sua cidade.",
+                    field_captured=False,
+                    current_field="cidade",
+                    in_registration_flow=True,
                 )
             
             city, uf = normalize_city_state(user_text)
@@ -212,9 +281,12 @@ class RegistrationManager:
                     f"Cidade não identificada: user_id={state.user_id}, "
                     f"input={user_text[:50]}"
                 )
-                return (
-                    state,
-                    "Não consegui entender sua cidade. Por favor, informe o nome da sua cidade.",
+                return self._create_hint(
+                    state=state,
+                    instruction="Faltam dados para concluir a inscrição. No momento esperamos o nome da sua cidade.",
+                    field_captured=False,
+                    current_field="cidade",
+                    in_registration_flow=True,
                 )
             
             data.city = city
@@ -227,24 +299,32 @@ class RegistrationManager:
             if uf:
                 data.state = uf
                 state.registration_step = RegistrationStep.ASKING_PROFILE
-                return (
-                    state,
-                    "Por último, qual é o seu perfil?\n"
-                    "(Exemplos: Produtor rural, Pesquisador(a), Empresa/Expositor, Estudante, etc.)",
+                return self._create_hint(
+                    state=state,
+                    instruction="Cidade e estado confirmados. Por último, precisamos saber qual é o seu perfil (exemplos: Produtor rural, Pesquisador(a), Empresa/Expositor, Estudante, etc.).",
+                    field_captured=True,
+                    current_field="perfil",
+                    in_registration_flow=True,
                 )
             else:
                 state.registration_step = RegistrationStep.ASKING_STATE
-                return (
-                    state,
-                    "Agora, por favor, me informe seu estado (UF).",
+                return self._create_hint(
+                    state=state,
+                    instruction="Cidade confirmada. Agora precisamos do estado (UF) onde você mora.",
+                    field_captured=True,
+                    current_field="estado",
+                    in_registration_flow=True,
                 )
 
         # 6. ASKING_STATE: coletar estado (UF)
         if step == RegistrationStep.ASKING_STATE:
             if not user_text.strip():
-                return (
-                    state,
-                    "Por favor, informe seu estado (UF) para continuarmos.",
+                return self._create_hint(
+                    state=state,
+                    instruction="Faltam dados para concluir a inscrição. No momento esperamos o estado (UF) onde você mora.",
+                    field_captured=False,
+                    current_field="estado",
+                    in_registration_flow=True,
                 )
             
             # Tenta normalizar (pode vir "Paraná" ou "PR")
@@ -268,10 +348,12 @@ class RegistrationManager:
                     f"Estado (UF) não identificado: user_id={state.user_id}, "
                     f"input={user_text[:50]}"
                 )
-                return (
-                    state,
-                    "Não consegui entender seu estado. "
-                    "Por favor, informe a sigla do estado (UF), por exemplo: PR, SP, MG.",
+                return self._create_hint(
+                    state=state,
+                    instruction="Faltam dados para concluir a inscrição. No momento esperamos a sigla do estado (UF), por exemplo: PR, SP, MG.",
+                    field_captured=False,
+                    current_field="estado",
+                    in_registration_flow=True,
                 )
             
             data.state = uf
@@ -280,18 +362,23 @@ class RegistrationManager:
                 f"state={uf}"
             )
             state.registration_step = RegistrationStep.ASKING_PROFILE
-            return (
-                state,
-                "Por último, qual é o seu perfil?\n"
-                "(Exemplos: Produtor rural, Pesquisador(a), Empresa/Expositor, Estudante, etc.)",
+            return self._create_hint(
+                state=state,
+                instruction="Estado confirmado. Por último, precisamos saber qual é o seu perfil (exemplos: Produtor rural, Pesquisador(a), Empresa/Expositor, Estudante, etc.).",
+                field_captured=True,
+                current_field="perfil",
+                in_registration_flow=True,
             )
 
         # 7. ASKING_PROFILE: coletar perfil
         if step == RegistrationStep.ASKING_PROFILE:
             if not user_text.strip():
-                return (
-                    state,
-                    "Por favor, informe seu perfil para continuarmos.",
+                return self._create_hint(
+                    state=state,
+                    instruction="Faltam dados para concluir a inscrição. No momento esperamos o perfil do participante (exemplos: Produtor rural, Pesquisador(a), Empresa/Expositor, Estudante, etc.).",
+                    field_captured=False,
+                    current_field="perfil",
+                    in_registration_flow=True,
                 )
             
             data.profile = normalize_profile(user_text)
@@ -301,19 +388,23 @@ class RegistrationManager:
             )
             state.registration_step = RegistrationStep.CONFIRMING
             
-            # Montar resumo com dados normalizados
-            summary = f"""Confira seus dados:
-
-Nome: {data.full_name}
-E-mail: {data.email}
-CPF: {data.cpf or 'Não informado'}
-Telefone: {data.phone or 'Não informado'}
-Cidade/UF: {data.city or 'Não informado'}/{data.state or 'Não informado'}
-Perfil: {data.profile or 'Não informado'}
-
-Está tudo correto? Responda 'sim' para confirmar ou 'não' para reiniciar o cadastro."""
+            # Montar resumo com dados normalizados para a IA
+            summary_parts = [
+                f"Nome: {data.full_name}",
+                f"E-mail: {data.email}",
+                f"CPF: {data.cpf or 'Não informado'}",
+                f"Telefone: {data.phone or 'Não informado'}",
+                f"Cidade/UF: {data.city or 'Não informado'}/{data.state or 'Não informado'}",
+                f"Perfil: {data.profile or 'Não informado'}",
+            ]
             
-            return (state, summary)
+            return self._create_hint(
+                state=state,
+                instruction=f"Todos os dados foram coletados. Confira os dados coletados: {'; '.join(summary_parts)}. Peça para o usuário confirmar se está tudo correto, respondendo 'sim' para confirmar ou 'não' para reiniciar o cadastro.",
+                field_captured=True,
+                current_field="confirmacao",
+                in_registration_flow=True,
+            )
 
         # 8. CONFIRMING: confirmar ou reiniciar
         if step == RegistrationStep.CONFIRMING:
@@ -341,12 +432,12 @@ Está tudo correto? Responda 'sim' para confirmar ou 'não' para reiniciar o cad
                             # Resetar o fluxo
                             state.registration_step = RegistrationStep.IDLE
                             state.registration_data = RegistrationData()
-                            return (
-                                state,
-                                f"Este CPF já está cadastrado no sistema.\n"
-                                f"Nome cadastrado: {existing.full_name}\n"
-                                f"E-mail: {existing.email}\n\n"
-                                f"Se você acredita que isso é um erro, entre em contato com a organização do evento.",
+                            return self._create_hint(
+                                state=state,
+                                instruction=f"Este CPF já está cadastrado no sistema. Nome cadastrado: {existing.full_name}. E-mail: {existing.email}. Se você acredita que isso é um erro, entre em contato com a organização do evento.",
+                                field_captured=False,
+                                current_field=None,
+                                in_registration_flow=False,
                             )
                     
                     # Salvar no banco de dados
@@ -395,11 +486,12 @@ Está tudo correto? Responda 'sim' para confirmar ou 'não' para reiniciar o cad
                             # O usuário já foi registrado no banco
                     
                     state.registration_step = RegistrationStep.COMPLETED
-                    return (
-                        state,
-                        "Sua inscrição foi registrada com sucesso! 🎟️\n"
-                        "Você receberá um e-mail de confirmação em breve.\n"
-                        "Se precisar de mais alguma coisa sobre o BioSummit 2026, é só me chamar.",
+                    return self._create_hint(
+                        state=state,
+                        instruction="Inscrição concluída com sucesso. O participante foi registrado no banco de dados e receberá um e-mail de confirmação em breve. Agora o bot pode funcionar apenas como FAQ do evento.",
+                        field_captured=True,
+                        current_field=None,
+                        in_registration_flow=False,
                     )
                 except IntegrityError as db_error:
                     error_msg = str(db_error).lower()
@@ -420,20 +512,22 @@ Está tudo correto? Responda 'sim' para confirmar ou 'não' para reiniciar o cad
                         try:
                             existing = repo.find_by_cpf(data.cpf or "")
                             if existing:
-                                return (
-                                    state,
-                                    f"Este CPF já está cadastrado no sistema.\n"
-                                    f"Nome cadastrado: {existing.full_name}\n"
-                                    f"E-mail: {existing.email}\n\n"
-                                    f"Se você acredita que isso é um erro, entre em contato com a organização do evento.",
+                                return self._create_hint(
+                                    state=state,
+                                    instruction=f"Este CPF já está cadastrado no sistema. Nome cadastrado: {existing.full_name}. E-mail: {existing.email}. Se você acredita que isso é um erro, entre em contato com a organização do evento.",
+                                    field_captured=False,
+                                    current_field=None,
+                                    in_registration_flow=False,
                                 )
                         except:
                             pass
                         
-                        return (
-                            state,
-                            "Este CPF já está cadastrado no sistema. "
-                            "Se você acredita que isso é um erro, entre em contato com a organização do evento.",
+                        return self._create_hint(
+                            state=state,
+                            instruction="Este CPF já está cadastrado no sistema. Se você acredita que isso é um erro, entre em contato com a organização do evento.",
+                            field_captured=False,
+                            current_field=None,
+                            in_registration_flow=False,
                         )
                     
                     logger.error(
@@ -476,22 +570,39 @@ Está tudo correto? Responda 'sim' para confirmar ou 'não' para reiniciar o cad
                 # Reiniciar cadastro
                 state.registration_data = RegistrationData()
                 state.registration_step = RegistrationStep.ASKING_NAME
-                return (
-                    state,
-                    "Sem problemas! Vamos começar novamente.\n"
-                    "Por favor, me informe seu nome completo.",
+                return self._create_hint(
+                    state=state,
+                    instruction="O usuário pediu para reiniciar o cadastro. Vamos começar novamente coletando o nome completo do participante.",
+                    field_captured=False,
+                    current_field="nome",
+                    in_registration_flow=True,
                 )
             
             else:
-                return (
-                    state,
-                    "Por favor, responda apenas 'sim' para confirmar ou 'não' para reiniciar o cadastro.",
+                return self._create_hint(
+                    state=state,
+                    instruction="Faltam dados para concluir a inscrição. No momento esperamos a confirmação do usuário. O usuário deve responder 'sim' para confirmar ou 'não' para reiniciar o cadastro.",
+                    field_captured=False,
+                    current_field="confirmacao",
+                    in_registration_flow=True,
                 )
 
         # 9. COMPLETED: não interfere no fluxo normal
         if step == RegistrationStep.COMPLETED:
-            return (state, "")
+            return self._create_hint(
+                state=state,
+                instruction=None,
+                field_captured=False,
+                current_field=None,
+                in_registration_flow=False,
+            )
 
         # Fallback (não deveria chegar aqui)
-        return (state, "")
+        return self._create_hint(
+            state=state,
+            instruction=None,
+            field_captured=False,
+            current_field=None,
+            in_registration_flow=False,
+        )
 

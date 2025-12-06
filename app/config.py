@@ -20,6 +20,7 @@ class AppConfig:
     smtp_password: str = ""
     smtp_from: str = "inscricao@biosummit.com.br"
     bot_api_key: str = ""
+    mock_event_data: bool = False
     system_prompt: str = (
         """
         Você é o assistente oficial da terceira edição do BioSummit (BioSummit 2026).
@@ -79,6 +80,12 @@ class AppConfig:
         - Sempre ofereça encaminhamento para a organização quando for algo muito específico.
         - IMPORTANTE: Sempre responda no mesmo idioma em que a mensagem foi escrita. Se o usuário escrever em inglês, responda em inglês. Se escrever em espanhol, responda em espanhol. Se escrever em português, responda em português. Detecte automaticamente o idioma da mensagem e mantenha a conversa nesse idioma.
 
+        ### Sobre o fluxo de inscrição:
+        - Você receberá, às vezes, um contexto adicional de fluxo de inscrição em um bloco chamado [Contexto do fluxo de inscrição].
+        - Sempre respeite essas instruções, mantendo um tom natural e humano.
+        - Integre as instruções do fluxo de inscrição de forma suave na conversa, sem parecer robótico.
+        - Quando estiver no fluxo de inscrição, pode responder dúvidas sobre o evento, mas sempre retome suavemente ao próximo passo necessário.
+
         ### Pode responder com segurança perguntas como:
         - Quando e onde será o BioSummit 2026?
         - Quem faz parte do Comitê Técnico?
@@ -112,6 +119,10 @@ class AppConfig:
         smtp_password = os.getenv("SMTP_PASSWORD", "")
         smtp_from = os.getenv("SMTP_FROM", "inscricao@biosummit.com.br")
         bot_api_key = os.getenv("BOT_API_KEY", "")
+        
+        # Carregar flag de mock de dados do evento
+        mock_event_data_raw = os.getenv("BIOSUMMIT_MOCK_EVENT_DATA", "0").lower()
+        mock_event_data = mock_event_data_raw in ("1", "true", "yes", "y")
 
         return cls(
             openai_api_key=api_key,
@@ -123,5 +134,6 @@ class AppConfig:
             smtp_password=smtp_password,
             smtp_from=smtp_from,
             bot_api_key=bot_api_key,
+            mock_event_data=mock_event_data,
         )
 

@@ -89,7 +89,7 @@ Endpoint para integração com gateway WhatsApp.
 **Request:**
 ```json
 {
-  "number": "5541999380969",
+  "number": "5541999999999",
   "text": "Olá!"
 }
 ```

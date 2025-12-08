@@ -132,6 +132,8 @@ class ChatbotEngine:
             mock_event_block = (
                 "\n\n[Dados simulados do evento para teste]\n"
                 "ATENÇÃO: As informações abaixo são SIMULADAS para ambiente de teste e não representam necessariamente os valores finais do evento.\n\n"
+                "IMPORTANTE: Quando o modo de dados simulados está ativo, você DEVE usar as informações abaixo para responder perguntas sobre valores, preços de inscrição, categorias de ingresso e outras informações do evento. "
+                "Não diga 'Não tenho essa informação' quando os dados simulados estiverem disponíveis neste bloco.\n\n"
                 f"Nome do evento: {ei.name} ({ei.edition})\n"
                 f"Datas: {ei.dates}\n"
                 f"Local: {ei.location}\n"

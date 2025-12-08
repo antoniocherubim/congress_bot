@@ -123,7 +123,9 @@ class AppConfig:
         # Carregar flag de mock de dados do evento
         mock_event_data_raw = os.getenv("BIOSUMMIT_MOCK_EVENT_DATA", "0").lower()
         mock_event_data = mock_event_data_raw in ("1", "true", "yes", "y")
-
+        print(f"Mock de dados do evento: {mock_event_data}")
+        print(f"Mock de dados do evento: {mock_event_data_raw}")
+        print(api_key)
         return cls(
             openai_api_key=api_key,
             openai_model=model,

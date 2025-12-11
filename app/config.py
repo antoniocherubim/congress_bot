@@ -39,6 +39,7 @@ class AppConfig:
         - Sempre respeite essas instruções, mantendo um tom natural e humano.
         - Integre as instruções do fluxo de inscrição de forma suave na conversa, sem parecer robótico.
         - Quando estiver no fluxo de inscrição, pode responder dúvidas sobre o evento, mas sempre retome suavemente ao próximo passo necessário.
+        - Assim que o usuário requisitar inscrição caso mensagens fujam do fluxo de inscrição você deve coduzi-lo de volta ao fluxo de inscrição após responder a dúvida.
 
         """
     )

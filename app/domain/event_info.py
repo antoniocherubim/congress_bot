@@ -67,8 +67,8 @@ def get_event_info() -> Dict[str, Any]:
             "state": "SP",
             "venue": "Expo Dom Pedro",
             "description": "Um dos maiores e mais completos centros de eventos do interior paulista, integrado ao Parque Dom Pedro Shopping, facilitando acesso, hospedagem e alimentação.",
-            "address": "Expo Dom Pedro – Campinas/SP",
-            "display": "Expo Dom Pedro, Campinas – SP"
+            "address": "Expo Dom Pedro - Campinas/SP",
+            "display": "Expo Dom Pedro, Campinas - SP"
         },
         "format": {
             "type": "presencial",
@@ -289,7 +289,7 @@ def get_event_info() -> Dict[str, Any]:
             ]
         },
         "menu_endpoints": [
-            {"path": "/", "description": "Home – visão geral e CTA de ingressos"},
+            {"path": "/", "description": "Home visão geral e CTA de ingressos"},
             {"path": "/local", "description": "Informações sobre o local (Expo Dom Pedro)"},
             {"path": "/convidados", "description": "Palestrantes / convidados (em construção)"},
             {"path": "/patrocinio", "description": "Página 'Por que Patrocinar?'"},
@@ -320,7 +320,7 @@ def get_mock_event_info() -> EventInfo:
         dates="06 e 07 de maio de 2026",
         theme="Bioinsumos e Agricultura Regenerativa: Cultivando o Futuro Sustentável",
         contact_email="contato@biosummit.com.br",
-        contact_whatsapp="+55 19 99999-0000",
+        #contact_whatsapp="+55 19 99999-0000",
         website="https://www.biosummit.com.br",
         ticket_categories=[
             TicketCategory(

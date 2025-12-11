@@ -355,7 +355,6 @@ def get_mock_event_info() -> EventInfo:
         ],
         faq_extra={
             "certificado_participacao": "Está prevista a emissão de certificado de participação digital para inscritos que fizerem check-in no evento.",
-            "idioma_evento": "O evento será conduzido principalmente em português, com algumas palestras possivelmente em inglês.",
             "alimentacao": "Haverá praça de alimentação terceirizada no local, não inclusa no valor da inscrição.",
         },
     )

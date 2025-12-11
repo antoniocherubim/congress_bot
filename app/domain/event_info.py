@@ -320,7 +320,7 @@ def get_mock_event_info() -> EventInfo:
         dates="06 e 07 de maio de 2026",
         theme="Bioinsumos e Agricultura Regenerativa: Cultivando o Futuro Sustentável",
         contact_email="contato@biosummit.com.br",
-        #contact_whatsapp="+55 19 99999-0000",
+        contact_whatsapp="+55 43 3025-5121",
         website="https://www.biosummit.com.br",
         ticket_categories=[
             TicketCategory(

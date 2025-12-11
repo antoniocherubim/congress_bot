@@ -488,7 +488,12 @@ class RegistrationManager:
                     state.registration_step = RegistrationStep.COMPLETED
                     return self._create_hint(
                         state=state,
-                        instruction="Inscrição concluída com sucesso. O participante foi registrado no banco de dados e receberá um e-mail de confirmação em breve. Agora o bot pode funcionar apenas como FAQ do evento.",
+                        instruction=(
+                            "Inscrição concluída com sucesso! O participante foi registrado no banco de dados e receberá um e-mail de confirmação em breve. "
+                            "IMPORTANTE: O processo de inscrição via bot está completo. NÃO mencione pagamento ou próximos passos de pagamento. "
+                            "Apenas confirme que a inscrição foi concluída e que o e-mail será enviado. "
+                            "Agora o bot pode funcionar apenas como FAQ do evento."
+                        ),
                         field_captured=True,
                         current_field=None,
                         in_registration_flow=False,

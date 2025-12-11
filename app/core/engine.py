@@ -102,7 +102,9 @@ class ChatbotEngine:
                 "Você deve sempre responder de forma natural e humana, como um assistente do congresso. "
                 "Se o usuário fizer uma pergunta ou sair do tema da inscrição, responda à dúvida com clareza e simpatia "
                 "e, em seguida, conduza suavemente de volta ao próximo passo do fluxo de inscrição. "
-                "Se o usuário forneceu claramente o dado esperado, confirme esse dado e avance naturalmente para o próximo campo."
+                "Se o usuário forneceu claramente o dado esperado, confirme esse dado e avance naturalmente para o próximo campo. "
+                "IMPORTANTE: Durante o fluxo de inscrição, NÃO mencione pagamento ou próximos passos de pagamento. "
+                "O bot apenas coleta os dados do participante. O pagamento (se necessário) será feito posteriormente na área do usuário do site oficial."
             )
         elif flow_hint.instruction:
             # Mesmo fora do fluxo ativo, se há uma instrução (ex: CPF duplicado), siga ela

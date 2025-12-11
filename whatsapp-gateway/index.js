@@ -10,6 +10,8 @@ const {
 const qrcode = require('qrcode-terminal');
 const P = require('pino');
 const fetch = require('node-fetch');
+const fs = require('fs');
+const path = require('path');
 
 const app = express();
 app.use(express.json());
@@ -19,6 +21,77 @@ const BOT_WHATSAPP_ENDPOINT = '/whatsapp';
 const PORT = process.env.PORT || 3333;
 
 let sockGlobal = null;
+
+// Configuração de logging para arquivo
+const logDir = path.join(__dirname, '..', 'logs');
+if (!fs.existsSync(logDir)) {
+  fs.mkdirSync(logDir, { recursive: true });
+}
+
+const logFile = path.join(logDir, 'gateway.log');
+
+// Salvar métodos originais do console antes de substituir
+const originalLog = console.log.bind(console);
+const originalError = console.error.bind(console);
+const originalWarn = console.warn.bind(console);
+const originalInfo = console.info.bind(console);
+
+// Função helper para logging que escreve no console e no arquivo
+function logToFile(level, ...args) {
+  const timestamp = new Date().toISOString();
+  
+  // Formatar mensagem para arquivo
+  const messageParts = args.map(arg => {
+    if (typeof arg === 'object') {
+      try {
+        return JSON.stringify(arg, null, 2);
+      } catch {
+        return String(arg);
+      }
+    }
+    return String(arg);
+  });
+  const logMessage = `[${timestamp}] [${level.toUpperCase()}] ${messageParts.join(' ')}\n`;
+  
+  // Escrever no console usando método original (evita loop infinito)
+  const consoleMethod = {
+    'log': originalLog,
+    'error': originalError,
+    'warn': originalWarn,
+    'info': originalInfo
+  }[level] || originalLog;
+  
+  consoleMethod(`[${timestamp}] [${level.toUpperCase()}]`, ...args);
+  
+  // Escrever no arquivo (append)
+  try {
+    fs.appendFileSync(logFile, logMessage, 'utf8');
+  } catch (error) {
+    // Se falhar ao escrever no arquivo, usar método original para evitar loop
+    originalError(`[ERRO] Falha ao escrever no arquivo de log: ${error.message}`);
+  }
+}
+
+// Substituir console.log, console.error, console.warn, console.info
+console.log = (...args) => {
+  logToFile('log', ...args);
+};
+
+console.error = (...args) => {
+  logToFile('error', ...args);
+};
+
+console.warn = (...args) => {
+  logToFile('warn', ...args);
+};
+
+console.info = (...args) => {
+  logToFile('info', ...args);
+};
+
+// Log inicial
+console.log(`Logging configurado. Arquivo de log: ${logFile}`);
+console.log(`Gateway iniciado em ${new Date().toISOString()}`);
 
 async function startBaileys() {
   const { state, saveCreds } = await useMultiFileAuthState('./auth_info');

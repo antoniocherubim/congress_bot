@@ -42,3 +42,7 @@ check_email_config.py
 .DS_Store
 Thumbs.db
 
+# Logs
+logs/
+*.log
+

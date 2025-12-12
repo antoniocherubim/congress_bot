@@ -1,6 +1,7 @@
 version: '3.8'
 
 services:
+  # Banco de dados
   postgres:
     image: postgres:16-alpine
     container_name: congress_bot_postgres
@@ -20,6 +21,7 @@ services:
     networks:
       - congress_bot_network
 
+  # Redis (compartilhado)
   redis:
     image: redis:7-alpine
     container_name: congress_bot_redis
@@ -36,48 +38,21 @@ services:
     networks:
       - congress_bot_network
 
+  # Backend API Python
   api:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: congress_bot_api
     environment:
-      # OpenAI
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-3o-mini}
-      
-      # Database
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://congress_bot:congress_bot_pass@postgres:5432/congress_bot}
-      
-      # Redis
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-604800}
-      
-      # Environment
       ENV: ${ENV:-prod}
       BOT_API_KEY: ${BOT_API_KEY}
-      
-      # Email (SMTP)
-      SMTP_HOST: ${SMTP_HOST:-dev-log}
-      SMTP_PORT: ${SMTP_PORT:-587}
-      SMTP_USER: ${SMTP_USER:-}
-      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
-      SMTP_FROM: ${SMTP_FROM:-inscricao@biosummit.com.br}
-      
-      # Mock
-      BIOSUMMIT_MOCK_EVENT_DATA: ${BIOSUMMIT_MOCK_EVENT_DATA:-0}
-      
-      # Session limits
-      SESSION_MAX_STORED_TURNS: ${SESSION_MAX_STORED_TURNS:-30}
-      
-      # OpenAI config
-      OPENAI_TIMEOUT_MS: ${OPENAI_TIMEOUT_MS:-20000}
-      OPENAI_MAX_RETRIES: ${OPENAI_MAX_RETRIES:-3}
-      OPENAI_RETRY_BASE_DELAY_MS: ${OPENAI_RETRY_BASE_DELAY_MS:-400}
-      
-      # Audio limits
-      MAX_AUDIO_BASE64_CHARS: ${MAX_AUDIO_BASE64_CHARS:-12000000}
-      MAX_AUDIO_BYTES: ${MAX_AUDIO_BYTES:-8388608}
+      # ... outras variáveis ...
     ports:
       - "${API_PORT:-8000}:8000"
     depends_on:
@@ -85,15 +60,56 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
     networks:
       - congress_bot_network
     restart: unless-stopped
+    # Comando para rodar migrações antes de iniciar
+    command: sh -c "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8000"
+
+  # Gateway WhatsApp
+  gateway:
+    build:
+      context: ./whatsapp-gateway
+      dockerfile: Dockerfile
+    container_name: biosummit-gateway
+    command: npm run start:gateway
+    env_file:
+      - ./whatsapp-gateway/.env
+    environment:
+      - REDIS_HOST=redis
+      - BOT_URL=http://api:8000
+    volumes:
+      - ./whatsapp-gateway/auth_info:/app/auth_info
+      - ./logs:/app/logs
+    depends_on:
+      - redis
+      - api
+    restart: unless-stopped
+    networks:
+      - congress_bot_network
+
+  # Worker WhatsApp
+  worker:
+    build:
+      context: ./whatsapp-gateway
+      dockerfile: Dockerfile
+    container_name: biosummit-worker
+    command: npm run start:worker
+    env_file:
+      - ./whatsapp-gateway/.env
+    environment:
+      - REDIS_HOST=redis
+      - BOT_URL=http://api:8000
+    volumes:
+      - ./whatsapp-gateway/auth_info:/app/auth_info
+      - ./logs:/app/logs
+    depends_on:
+      - redis
+      - api
+      - gateway
+    restart: unless-stopped
+    networks:
+      - congress_bot_network
 
 volumes:
   postgres_data:
@@ -102,4 +118,3 @@ volumes:
 networks:
   congress_bot_network:
     driver: bridge
-

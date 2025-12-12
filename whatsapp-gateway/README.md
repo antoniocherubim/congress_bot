@@ -21,11 +21,23 @@ O sistema é composto por três componentes principais:
 
 ## Pré-requisitos
 
-- Node.js 18+ (para fetch nativo)
+- Node.js 20+ (para fetch nativo)
 - Redis 6+
 - Backend Python rodando
 
-## Instalação
+## Instalação e Execução
+
+### Opção 1: Docker Compose Unificado (Recomendado)
+
+O gateway está integrado ao `docker-compose.yml` principal do projeto. Veja o [README.md](../README.md) principal para instruções completas.
+
+**Resumo:**
+1. Configure o `.env` na raiz do projeto
+2. Configure o `whatsapp-gateway/.env` (veja variáveis abaixo)
+3. Execute: `docker-compose up -d`
+4. Verifique logs: `docker-compose logs -f gateway`
+
+### Opção 2: Execução Local (Desenvolvimento)
 
 1. Instale as dependências:
 ```bash
@@ -42,44 +54,45 @@ cp .env.example .env
 
 Edite o `.env` com suas configurações (veja seção "Variáveis de Ambiente" abaixo).
 
-## Execução
+3. Execute:
 
-### Desenvolvimento (tudo em um processo)
-
+#### Desenvolvimento (tudo em um processo):
 ```bash
 npm start
 ```
 
 **Nota**: Em desenvolvimento, o gateway processa mensagens diretamente. Para produção, use gateway + worker separados.
 
-### Produção (Gateway + Worker separados)
+#### Produção (Gateway + Worker separados):
 
-#### Terminal 1 - Gateway:
+**Terminal 1 - Gateway:**
 ```bash
 npm run start:gateway
 ```
 
-#### Terminal 2 - Worker:
+**Terminal 2 - Worker:**
 ```bash
 npm run start:worker
 ```
 
 ## Variáveis de Ambiente
 
-| Variável | Descrição | Padrão |
-|----------|-----------|--------|
-| `BOT_URL` | URL do backend Python | `http://localhost:8000` |
-| `BOT_API_KEY` | Chave de autenticação (deve ser igual no backend) | - |
-| `PORT` | Porta do gateway HTTP | `3333` |
-| `REDIS_HOST` | Host do Redis | `localhost` |
-| `REDIS_PORT` | Porta do Redis | `6379` |
-| `REDIS_PASSWORD` | Senha do Redis (opcional) | - |
-| `REDIS_DB` | Database do Redis | `0` |
-| `QUEUE_CONCURRENCY` | Número máximo de jobs processados simultaneamente | `20` |
-| `DEDUPE_TTL_SECONDS` | TTL para deduplicação (6h padrão) | `21600` |
-| `LOCK_TTL_SECONDS` | TTL do lock por conversa | `60` |
-| `HTTP_TIMEOUT_MS` | Timeout para chamadas HTTP | `20000` |
-| `DEBUG_MESSAGES` | Log detalhado de mensagens (true/false) | `false` |
+| Variável | Descrição | Padrão | Docker Compose |
+|----------|-----------|--------|----------------|
+| `BOT_URL` | URL do backend Python | `http://localhost:8000` | `http://api:8000` |
+| `BOT_API_KEY` | Chave de autenticação (deve ser igual no backend) | - | Obrigatório |
+| `PORT` | Porta do gateway HTTP | `3333` | 3333 (interno) |
+| `REDIS_HOST` | Host do Redis | `localhost` | `redis` |
+| `REDIS_PORT` | Porta do Redis | `6379` | `6379` |
+| `REDIS_PASSWORD` | Senha do Redis (opcional) | - | - |
+| `REDIS_DB` | Database do Redis | `0` | `0` |
+| `QUEUE_CONCURRENCY` | Número máximo de jobs processados simultaneamente | `20` | `20` |
+| `DEDUPE_TTL_SECONDS` | TTL para deduplicação (6h padrão) | `21600` | `21600` |
+| `LOCK_TTL_SECONDS` | TTL do lock por conversa | `60` | `60` |
+| `HTTP_TIMEOUT_MS` | Timeout para chamadas HTTP | `20000` | `20000` |
+| `DEBUG_MESSAGES` | Log detalhado de mensagens (true/false) | `false` | `false` |
+
+**Nota para Docker Compose**: No ambiente Docker, use `BOT_URL=http://api:8000` e `REDIS_HOST=redis` (nomes dos serviços no docker-compose).
 
 ## Como Funciona
 

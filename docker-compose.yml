@@ -45,14 +45,38 @@ services:
       dockerfile: Dockerfile
     container_name: congress_bot_api
     environment:
+      # OpenAI
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-3o-mini}
+      OPENAI_TIMEOUT_MS: ${OPENAI_TIMEOUT_MS:-20000}
+      OPENAI_MAX_RETRIES: ${OPENAI_MAX_RETRIES:-3}
+      OPENAI_RETRY_BASE_DELAY_MS: ${OPENAI_RETRY_BASE_DELAY_MS:-400}
+      
+      # Database
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://congress_bot:congress_bot_pass@postgres:5432/congress_bot}
+      
+      # Redis
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-604800}
+      SESSION_MAX_STORED_TURNS: ${SESSION_MAX_STORED_TURNS:-30}
+      
+      # Environment
       ENV: ${ENV:-prod}
       BOT_API_KEY: ${BOT_API_KEY}
-      # ... outras variáveis ...
+      
+      # Email (SMTP)
+      SMTP_HOST: ${SMTP_HOST:-dev-log}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-inscricao@biosummit.com.br}
+      
+      # Mock
+      BIOSUMMIT_MOCK_EVENT_DATA: ${BIOSUMMIT_MOCK_EVENT_DATA:-0}
+      
+      # Audio limits
+      MAX_AUDIO_BASE64_CHARS: ${MAX_AUDIO_BASE64_CHARS:-12000000}
+      MAX_AUDIO_BYTES: ${MAX_AUDIO_BYTES:-8388608}
     ports:
       - "${API_PORT:-8000}:8000"
     depends_on:

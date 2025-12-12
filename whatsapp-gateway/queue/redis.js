@@ -23,7 +23,7 @@ function createRedisConnection() {
       console.log(`[Redis] Tentando reconectar (tentativa ${times}) em ${delay}ms...`);
       return delay;
     },
-    maxRetriesPerRequest: 3,
+    maxRetriesPerRequest: null,  // BullMQ requer null
   };
 
   if (REDIS_PASSWORD) {

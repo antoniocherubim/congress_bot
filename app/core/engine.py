@@ -25,7 +25,7 @@ class ChatbotEngine:
 
     def __init__(self, config: AppConfig) -> None:
         self._config = config
-        self._sessions = InMemorySessionManager()
+        self._sessions = InMemorySessionManager(max_stored_turns=config.session_max_stored_turns)
         self._lm_client = LanguageModelClient(config)
         
         # Extrair tipo de DB da URL (sem credenciais)
@@ -53,7 +53,7 @@ class ChatbotEngine:
             email_service=self._email_service,
         )
 
-    def handle_message(self, user_id: str, message_text: str) -> Dict[str, Any]:
+    def handle_message(self, user_id: str, message_text: str, request_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Processa uma mensagem do usuário e retorna uma resposta.
 
@@ -321,12 +321,13 @@ class ChatbotEngine:
         # 6. Chamar modelo de linguagem SEMPRE
         logger.debug(
             f"Mensagem será encaminhada para modelo de linguagem: user_id={user_id}, "
-            f"history_size={len(state.history)}"
+            f"history_size={len(state.history)}, request_id={request_id or 'N/A'}"
         )
         
         reply_text = self._lm_client.generate_reply(
             system_prompt=hybrid_system_prompt,
             messages=messages_for_model,
+            request_id=request_id,
         )
 
         logger.info(
@@ -340,8 +341,12 @@ class ChatbotEngine:
             f"reply_preview={reply_text[:100]}..."
         )
 
-        # 7. Atualizar estado da conversa
-        state.add_turn(user_msg=message_text, assistant_msg=reply_text)
+        # 7. Atualizar estado da conversa (com poda automática)
+        state.add_turn(
+            user_msg=message_text,
+            assistant_msg=reply_text,
+            max_stored_turns=self._config.session_max_stored_turns
+        )
 
         # 8. Retornar resposta com metadados mínimos
         return {

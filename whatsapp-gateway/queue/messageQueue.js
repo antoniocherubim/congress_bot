@@ -42,10 +42,36 @@ async function enqueueIncomingMessage(payload) {
   const { remoteJid, messageId } = payload;
 
   // Job ID baseado no messageId para garantir idempotência
-  // BullMQ não permite ':' no jobId, então sanitizamos o messageId
-  // Substituir ':' por '-' para garantir compatibilidade
-  const sanitizedMessageId = messageId ? messageId.replace(/:/g, '-') : messageId;
-  const jobId = `msg-${sanitizedMessageId}`;
+  // BullMQ não permite ':' e outros caracteres especiais no jobId
+  // Sanitizar o messageId removendo/re substituindo caracteres problemáticos
+  let sanitizedMessageId = messageId || '';
+  // Substituir todos os caracteres problemáticos por '-'
+  sanitizedMessageId = sanitizedMessageId.replace(/[:@#\s]/g, '-');
+  // Remover múltiplos hífens consecutivos
+  sanitizedMessageId = sanitizedMessageId.replace(/-+/g, '-');
+  // Remover hífens no início e fim
+  sanitizedMessageId = sanitizedMessageId.replace(/^-+|-+$/g, '');
+  
+  // Se após sanitização ficar vazio, usar hash do messageId original
+  if (!sanitizedMessageId) {
+    const crypto = require('crypto');
+    sanitizedMessageId = crypto.createHash('md5').update(messageId || '').digest('hex').substring(0, 16);
+  }
+  
+  let jobId = `msg-${sanitizedMessageId}`;
+  
+  // Garantir que jobId não contém caracteres problemáticos (sanitização final)
+  jobId = jobId.replace(/[:@#\s]/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '');
+  
+  // Debug: verificar se jobId ainda contém caracteres inválidos
+  if (jobId.includes(':')) {
+    console.error(`[Queue] ERRO: jobId ainda contém ':' após sanitização! jobId=${jobId}, messageId=${messageId}`);
+    // Forçar remoção de ':' como fallback final
+    jobId = jobId.replace(/:/g, '-');
+    console.warn(`[Queue] Usando jobId sanitizado final: ${jobId}`);
+  }
+  
+  const finalJobId = jobId;
 
   // Adicionar remoteJid ao payload para agrupamento
   const jobData = {
@@ -59,7 +85,7 @@ async function enqueueIncomingMessage(payload) {
       'process-message',
       jobData,
       {
-        jobId, // Usar messageId como jobId para evitar duplicatas
+        jobId: finalJobId, // Usar messageId sanitizado como jobId para evitar duplicatas
         // Prioridade: mensagens mais recentes têm prioridade ligeiramente maior
         priority: Date.now(),
       }

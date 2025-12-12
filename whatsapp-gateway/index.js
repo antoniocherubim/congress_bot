@@ -104,6 +104,10 @@ console.info = (...args) => {
 console.log(`Logging configurado. Arquivo de log: ${logFile}`);
 console.log(`Gateway iniciado em ${new Date().toISOString()}`);
 
+// Contador de tentativas de reconexão
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 10;
+
 async function startBaileys() {
   const { state, saveCreds } = await useMultiFileAuthState('./auth_info');
   const { version, isLatest } = await fetchLatestBaileysVersion();
@@ -122,6 +126,9 @@ async function startBaileys() {
       // Retornar undefined para mensagens não encontradas
       return undefined;
     },
+    // Timeout de conexão aumentado
+    connectTimeoutMs: 60000, // 60 segundos
+    defaultQueryTimeoutMs: 60000, // 60 segundos
   });
 
   sock.ev.on('connection.update', (update) => {
@@ -130,12 +137,14 @@ async function startBaileys() {
     if (qr) {
       console.log('QR Code gerado, escaneie com o WhatsApp:');
       qrcode.generate(qr, { small: true });
+      reconnectAttempts = 0; // Reset contador ao gerar QR
     }
 
     if (connection === 'close') {
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       const isLoggedOut = statusCode === DisconnectReason.loggedOut;
       const isUnauthorized = statusCode === 401;
+      const isTimeout = statusCode === 408;
       
       console.log('Conexão fechada');
       console.log(`Código de erro: ${statusCode}`);
@@ -145,21 +154,54 @@ async function startBaileys() {
         console.error('⚠️  ERRO: Sessão expirada ou invalidada (401/Logged Out)');
         console.error('');
         console.error('Para resolver:');
-        console.error('1. Pare o gateway (Ctrl+C)');
+        console.error('1. Pare o gateway');
         console.error('2. Delete a pasta auth_info:');
         console.error('   rm -rf whatsapp-gateway/auth_info');
-        console.error('   (ou no Windows: rmdir /s whatsapp-gateway\\auth_info)');
         console.error('3. Inicie o gateway novamente e escaneie o QR Code');
         console.error('');
+        reconnectAttempts = 0;
         process.exit(1);
+      } else if (isTimeout) {
+        reconnectAttempts++;
+        
+        if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+          console.error('');
+          console.error(`⚠️  ERRO: Muitas tentativas de reconexão (${reconnectAttempts})`);
+          console.error('O WhatsApp pode estar bloqueando a conexão ou há problema de rede.');
+          console.error('');
+          console.error('Soluções:');
+          console.error('1. Verifique sua conexão com a internet');
+          console.error('2. Aguarde alguns minutos e reinicie o gateway');
+          console.error('3. Se persistir, delete auth_info e reconecte:');
+          console.error('   rm -rf whatsapp-gateway/auth_info');
+          console.error('');
+          reconnectAttempts = 0;
+          // Não sair, apenas aguardar mais tempo antes de tentar novamente
+          setTimeout(() => {
+            reconnectAttempts = 0; // Reset após espera longa
+            startBaileys();
+          }, 60000); // Aguardar 1 minuto
+        } else {
+          // Backoff exponencial: 3s, 6s, 12s, 24s, 48s, max 60s
+          const delay = Math.min(3000 * Math.pow(2, reconnectAttempts - 1), 60000);
+          console.log(`Reconectando automaticamente em ${delay/1000}s (tentativa ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
+          setTimeout(() => {
+            startBaileys();
+          }, delay);
+        }
       } else {
-        console.log('Reconectando automaticamente...');
+        // Outros erros: reconexão com backoff
+        reconnectAttempts++;
+        const delay = Math.min(3000 * Math.pow(2, Math.min(reconnectAttempts - 1, 4)), 30000);
+        console.log(`Reconectando automaticamente em ${delay/1000}s (tentativa ${reconnectAttempts})...`);
         setTimeout(() => {
           startBaileys();
-        }, 3000);
+        }, delay);
       }
     } else if (connection === 'open') {
       console.log('✅ Conectado ao WhatsApp com sucesso!');
+      reconnectAttempts = 0; // Reset contador ao conectar com sucesso
+      sockGlobal = sock; // Salvar referência global
     }
   });
 

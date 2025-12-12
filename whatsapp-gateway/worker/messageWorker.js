@@ -5,7 +5,7 @@
  * - Deduplicação por messageId
  * - Extração de texto (texto, áudio, imagem, etc.)
  * - Chamada ao backend Python com timeout
- * - Envio de resposta via Baileys
+ * - Envio de resposta via endpoint do gateway (/send-text)
  * - Controle de concorrência (1 por conversa)
  */
 require('dotenv').config();
@@ -22,21 +22,24 @@ const { fetchWithTimeout } = require('../utils/http');
 
 const redis = getRedisConnection();
 const BOT_URL = process.env.BOT_URL || 'http://localhost:8000';
+const GATEWAY_URL = process.env.GATEWAY_URL || 'http://gateway:3333';
 const BOT_WHATSAPP_ENDPOINT = '/whatsapp';
+const GATEWAY_SEND_ENDPOINT = '/send-text';
 const QUEUE_CONCURRENCY = parseInt(process.env.QUEUE_CONCURRENCY || '20', 10);
 const DEDUPE_TTL_SECONDS = parseInt(process.env.DEDUPE_TTL_SECONDS || '21600', 10); // 6 horas
 const LOCK_TTL_SECONDS = parseInt(process.env.LOCK_TTL_SECONDS || '60', 10);
 const HTTP_TIMEOUT_MS = parseInt(process.env.HTTP_TIMEOUT_MS || '20000', 10);
 
-// Socket Baileys global (será inicializado)
-let sockGlobal = null;
+// Socket Baileys temporário apenas para download de mídia (áudio)
+let sockForMedia = null;
 
 /**
- * Inicializa conexão Baileys (reutiliza auth existente)
+ * Inicializa socket Baileys temporário apenas para download de mídia
+ * (não usado para enviar mensagens, apenas para downloadMediaMessage)
  */
-async function initBaileysSocket() {
-  if (sockGlobal) {
-    return sockGlobal;
+async function initBaileysSocketForMedia() {
+  if (sockForMedia) {
+    return sockForMedia;
   }
 
   try {
@@ -49,16 +52,16 @@ async function initBaileysSocket() {
       auth: state,
       browser: ['BioSummit Bot Worker', 'Chrome', '1.0.0'],
       syncFullHistory: false,
-      markOnlineOnConnect: true,
+      markOnlineOnConnect: false, // Não marcar online, apenas para download
       generateHighQualityLinkPreview: false,
       getMessage: async () => undefined,
     });
 
-    sockGlobal = sock;
-    console.log('[Worker] Socket Baileys inicializado');
+    sockForMedia = sock;
+    console.log('[Worker] Socket Baileys para mídia inicializado');
     return sock;
   } catch (error) {
-    console.error('[Worker] Erro ao inicializar Baileys:', error.message);
+    console.error('[Worker] Erro ao inicializar Baileys para mídia:', error.message);
     throw error;
   }
 }
@@ -108,10 +111,9 @@ async function releaseConversationLock(remoteJid) {
  * Extrai texto da mensagem (suporta texto, extendedText, caption, áudio)
  * @param {object} message - Objeto da mensagem do Baileys
  * @param {object} messageKey - Chave da mensagem
- * @param {object} sock - Socket Baileys
  * @returns {Promise<string>} Texto extraído ou vazio
  */
-async function extractText(message, messageKey, sock) {
+async function extractText(message, messageKey) {
   // Texto simples
   if (message?.conversation) {
     return message.conversation;
@@ -135,13 +137,18 @@ async function extractText(message, messageKey, sock) {
     try {
       console.log(`[Worker] Transcrevendo áudio: messageId=${messageKey.id}`);
       
+      // Inicializar socket apenas para download de mídia
+      if (!sockForMedia) {
+        await initBaileysSocketForMedia();
+      }
+      
       const mediaBuffer = await downloadMediaMessage(
         { key: messageKey, message },
         'buffer',
         {},
         {
           logger: P({ level: 'silent' }),
-          reuploadRequest: sock.updateMediaMessage,
+          reuploadRequest: sockForMedia.updateMediaMessage,
         }
       );
 
@@ -204,11 +211,7 @@ async function getJidForNumber(number) {
   return await redis.get(key);
 }
 
-// Inicializar socket antes de criar worker
-initBaileysSocket().catch((error) => {
-  console.error('[Worker] Falha ao inicializar Baileys:', error);
-  process.exit(1);
-});
+// Socket será inicializado sob demanda apenas para download de mídia
 
 // Criar worker
 const worker = new Worker(
@@ -246,26 +249,14 @@ const worker = new Worker(
       // 3. Salvar mapeamento number -> remoteJid
       await saveNumberToJidMapping(number, remoteJid);
 
-      // 4. Garantir que socket está inicializado
-      if (!sockGlobal) {
-        await initBaileysSocket();
-      }
-
-      // 5. Extrair texto
-      const text = await extractText(message, messageKey, sockGlobal);
+      // 4. Extrair texto (socket será inicializado automaticamente se precisar de mídia)
+      const text = await extractText(message, messageKey);
 
       if (!text || !text.trim()) {
         console.log(`[Worker] Mensagem ${messageId} sem texto processável`);
         clearInterval(lockRenewalInterval);
         await releaseConversationLock(remoteJid);
         return { status: 'no_text', messageId };
-      }
-
-      // 6. Marcar mensagem como lida
-      try {
-        await sockGlobal.readMessages([messageKey]);
-      } catch (readError) {
-        console.warn(`[Worker] Não foi possível marcar mensagem como lida: ${readError.message}`);
       }
 
       // 7. Chamar backend Python
@@ -299,10 +290,36 @@ const worker = new Worker(
       const data = await response.json();
       const reply = data.reply || '';
 
-      // 8. Enviar resposta
+      // 8. Enviar resposta via endpoint do gateway
       if (reply && reply.trim()) {
-        await sockGlobal.sendMessage(remoteJid, { text: reply });
-        console.log(`[Worker] Resposta enviada: messageId=${messageId}, remoteJid=${remoteJid}`);
+        const sendHeaders = {
+          'Content-Type': 'application/json',
+        };
+
+        const apiKey = process.env.BOT_API_KEY;
+        if (apiKey && apiKey.trim()) {
+          sendHeaders['X-API-KEY'] = apiKey;
+        }
+
+        const sendResponse = await fetchWithTimeout(
+          `${GATEWAY_URL}${GATEWAY_SEND_ENDPOINT}`,
+          {
+            method: 'POST',
+            headers: sendHeaders,
+            body: JSON.stringify({
+              number: number,
+              text: reply,
+            }),
+          },
+          HTTP_TIMEOUT_MS
+        );
+
+        if (!sendResponse.ok) {
+          const errorText = await sendResponse.text();
+          throw new Error(`Gateway retornou ${sendResponse.status} ao enviar mensagem: ${errorText}`);
+        }
+
+        console.log(`[Worker] Resposta enviada via gateway: messageId=${messageId}, remoteJid=${remoteJid}`);
       } else {
         console.warn(`[Worker] Resposta vazia do backend para messageId=${messageId}`);
       }

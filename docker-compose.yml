@@ -124,6 +124,7 @@ services:
     environment:
       - REDIS_HOST=redis
       - BOT_URL=http://api:8000
+      - GATEWAY_URL=http://gateway:3333
     volumes:
       - ./whatsapp-gateway/auth_info:/app/auth_info
       - ./logs:/app/logs

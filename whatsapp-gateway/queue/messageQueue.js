@@ -81,13 +81,22 @@ async function enqueueIncomingMessage(payload) {
   };
 
   try {
+    // Calcular prioridade normalizada (BullMQ aceita 0-2097152)
+    // Usar timestamp normalizado para manter ordem: mensagens mais recentes = prioridade maior
+    // Pegar os últimos dígitos do timestamp e normalizar para o range permitido
+    const timestamp = Date.now();
+    // Usar módulo para garantir que fique dentro do range
+    // Prioridade máxima do BullMQ é 2097152, então normalizamos para 0-2097151
+    const normalizedPriority = Math.floor(timestamp % 2097152);
+    
     const job = await messageQueue.add(
       'process-message',
       jobData,
       {
         jobId: finalJobId, // Usar messageId sanitizado como jobId para evitar duplicatas
-        // Prioridade: mensagens mais recentes têm prioridade ligeiramente maior
-        priority: Date.now(),
+        // Prioridade normalizada: mensagens mais recentes têm prioridade ligeiramente maior
+        // Range: 0-2097151 (dentro do limite do BullMQ)
+        priority: normalizedPriority,
       }
     );
 

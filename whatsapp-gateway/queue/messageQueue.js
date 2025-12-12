@@ -42,7 +42,8 @@ async function enqueueIncomingMessage(payload) {
   const { remoteJid, messageId } = payload;
 
   // Job ID baseado no messageId para garantir idempotência
-  const jobId = `msg:${messageId}`;
+  // BullMQ não permite ':' no jobId, então usamos '-' como separador
+  const jobId = `msg-${messageId}`;
 
   // Adicionar remoteJid ao payload para agrupamento
   const jobData = {

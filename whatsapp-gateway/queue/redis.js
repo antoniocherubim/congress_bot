@@ -18,12 +18,13 @@ function createRedisConnection() {
     host: REDIS_HOST,
     port: REDIS_PORT,
     db: REDIS_DB,
+    maxRetriesPerRequest: null,  // BullMQ requer null (obrigatório)
+    enableReadyCheck: false,    // BullMQ recomendado
     retryStrategy: (times) => {
       const delay = Math.min(times * 50, 2000);
       console.log(`[Redis] Tentando reconectar (tentativa ${times}) em ${delay}ms...`);
       return delay;
     },
-    maxRetriesPerRequest: null,  // BullMQ requer null
   };
 
   if (REDIS_PASSWORD) {

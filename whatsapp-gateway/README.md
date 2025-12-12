@@ -1,6 +1,29 @@
-# Gateway WhatsApp - BioSummit 2026
+# Gateway WhatsApp - BioSummit 2026 (Produção)
 
-Gateway em Node.js que conecta o WhatsApp ao backend Python usando @whiskeysockets/baileys.
+Gateway em Node.js que conecta o WhatsApp ao backend Python usando @whiskeysockets/baileys, com processamento assíncrono via Redis e BullMQ.
+
+## Arquitetura
+
+O sistema é composto por três componentes principais:
+
+1. **Gateway** (`index.js`): Recebe mensagens do WhatsApp e enfileira para processamento
+2. **Worker** (`worker/messageWorker.js`): Processa mensagens da fila com controle de concorrência e idempotência
+3. **Redis**: Backend para fila (BullMQ) e cache de locks/deduplicação
+
+### Características
+
+- ✅ **Ordenação por conversa**: Garante que mensagens de uma mesma conversa sejam processadas em ordem
+- ✅ **Idempotência**: Evita processar a mesma mensagem duas vezes (deduplicação por messageId)
+- ✅ **Controle de concorrência**: 20 jobs globais, mas apenas 1 por conversa simultaneamente
+- ✅ **Timeouts**: Todas as chamadas HTTP têm timeout configurável
+- ✅ **Retry automático**: BullMQ retenta jobs falhos com backoff exponencial
+- ✅ **Suporte a @lid**: /send-text funciona com contatos iniciados por link
+
+## Pré-requisitos
+
+- Node.js 18+ (para fetch nativo)
+- Redis 6+
+- Backend Python rodando
 
 ## Instalação
 
@@ -11,39 +34,85 @@ npm install
 
 2. Configure as variáveis de ambiente:
 
-Crie um arquivo `.env` no diretório `whatsapp-gateway/` com:
+Copie `.env.example` para `.env` e ajuste:
 
-```
-BOT_URL=http://localhost:8000
-BOT_API_KEY=uma-chave-secreta-aleatoria
-PORT=3000
+```bash
+cp .env.example .env
 ```
 
-**Importante**: A `BOT_API_KEY` deve ser a mesma configurada no backend Python.
+Edite o `.env` com suas configurações (veja seção "Variáveis de Ambiente" abaixo).
 
 ## Execução
+
+### Desenvolvimento (tudo em um processo)
 
 ```bash
 npm start
 ```
 
-Ou em modo desenvolvimento (com auto-reload):
+**Nota**: Em desenvolvimento, o gateway processa mensagens diretamente. Para produção, use gateway + worker separados.
+
+### Produção (Gateway + Worker separados)
+
+#### Terminal 1 - Gateway:
 ```bash
-npm run dev
+npm run start:gateway
 ```
+
+#### Terminal 2 - Worker:
+```bash
+npm run start:worker
+```
+
+## Variáveis de Ambiente
+
+| Variável | Descrição | Padrão |
+|----------|-----------|--------|
+| `BOT_URL` | URL do backend Python | `http://localhost:8000` |
+| `BOT_API_KEY` | Chave de autenticação (deve ser igual no backend) | - |
+| `PORT` | Porta do gateway HTTP | `3333` |
+| `REDIS_HOST` | Host do Redis | `localhost` |
+| `REDIS_PORT` | Porta do Redis | `6379` |
+| `REDIS_PASSWORD` | Senha do Redis (opcional) | - |
+| `REDIS_DB` | Database do Redis | `0` |
+| `QUEUE_CONCURRENCY` | Número máximo de jobs processados simultaneamente | `20` |
+| `DEDUPE_TTL_SECONDS` | TTL para deduplicação (6h padrão) | `21600` |
+| `LOCK_TTL_SECONDS` | TTL do lock por conversa | `60` |
+| `HTTP_TIMEOUT_MS` | Timeout para chamadas HTTP | `20000` |
+| `DEBUG_MESSAGES` | Log detalhado de mensagens (true/false) | `false` |
 
 ## Como Funciona
 
-1. Ao iniciar, o gateway gera um QR Code no terminal
-2. Escaneie o QR Code com o WhatsApp que será usado como bot
-3. Todas as mensagens de texto recebidas são automaticamente:
-   - Enviadas ao backend Python via POST `/whatsapp`
-   - A resposta do bot é enviada de volta ao usuário no WhatsApp
+### Fluxo de Mensagem
+
+1. **Gateway recebe mensagem** do WhatsApp via Baileys
+2. **Filtros aplicados**: Ignora mensagens próprias, grupos, broadcasts
+3. **Enfileiramento**: Mensagem é adicionada à fila BullMQ com `messageId` como jobId (idempotência)
+4. **Worker processa**:
+   - Verifica deduplicação (Redis SET NX)
+   - Adquire lock da conversa (1 por remoteJid)
+   - Extrai texto (suporta texto, áudio, imagem com caption)
+   - Chama backend Python com timeout
+   - Envia resposta via Baileys
+   - Libera lock
+
+### Garantias
+
+- **Ordenação**: Lock por conversa garante processamento sequencial
+- **Idempotência**: messageId como jobId + Redis SET NX evita duplicatas
+- **Resiliência**: Jobs falhos são retentados automaticamente (3 tentativas, backoff exponencial)
+- **Sem perda**: Se backend estiver offline, jobs ficam na fila e são processados quando voltar
 
 ## Endpoints
 
 ### POST /send-text
-Envia uma mensagem manualmente (útil para testes).
+
+Envia mensagem manualmente. Suporta contatos @lid (busca último JID conhecido no Redis).
+
+**Headers:**
+```
+X-API-KEY: sua-chave-secreta (se BOT_API_KEY estiver configurada)
+```
 
 **Request:**
 ```json
@@ -58,63 +127,113 @@ Envia uma mensagem manualmente (útil para testes).
 {
   "success": true,
   "message": "Mensagem enviada com sucesso",
-  "number": "5541999380969"
+  "number": "5541999380969",
+  "jid": "5541999380969@s.whatsapp.net"
 }
 ```
 
 ### GET /health
-Verifica o status do gateway e conexão com WhatsApp.
+
+Verifica status do gateway.
 
 **Response:**
 ```json
 {
   "status": "ok",
-  "whatsapp_connected": true
+  "whatsapp_connected": true,
+  "timestamp": "2026-01-15T10:30:00.000Z"
 }
+```
+
+## Docker Compose
+
+Exemplo de `docker-compose.yml`:
+
+```yaml
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+
+  gateway:
+    build: .
+    command: npm run start:gateway
+    env_file:
+      - .env
+    volumes:
+      - ./auth_info:/app/auth_info
+      - ../logs:/app/logs
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  worker:
+    build: .
+    command: npm run start:worker
+    env_file:
+      - .env
+    volumes:
+      - ./auth_info:/app/auth_info
+      - ../logs:/app/logs
+    depends_on:
+      - redis
+      - gateway
+    restart: unless-stopped
+
+volumes:
+  redis-data:
 ```
 
 ## Estrutura de Arquivos
 
-- `index.js` - Código principal do gateway
-- `package.json` - Dependências e scripts
-- `.env` - Variáveis de ambiente (não versionado)
-- `auth_info/` - Dados de autenticação do Baileys (não versionado)
+```
+whatsapp-gateway/
+├── index.js                 # Gateway (recebe mensagens, enfileira)
+├── worker/
+│   └── messageWorker.js    # Worker (processa mensagens da fila)
+├── queue/
+│   ├── redis.js            # Configuração Redis
+│   └── messageQueue.js     # Fila BullMQ
+├── utils/
+│   └── http.js             # Utilitários HTTP com timeout
+├── package.json
+├── .env                     # Variáveis de ambiente (não versionado)
+└── auth_info/              # Autenticação Baileys (não versionado)
+```
 
 ## Troubleshooting
 
 ### Erro 401 (Sessão Expirada)
 
-Se você receber um erro `401 Unauthorized` ou `Connection Failure` com código 401, isso significa que a sessão do WhatsApp expirou ou foi invalidada.
+1. Pare gateway e worker
+2. Delete `auth_info/`
+3. Reinicie e escaneie novo QR Code
 
-**Como resolver:**
+### Mensagens não são processadas
 
-1. Pare o gateway (Ctrl+C)
-2. Delete a pasta `auth_info`:
-   ```bash
-   # Linux/Mac:
-   rm -rf whatsapp-gateway/auth_info
-   
-   # Windows:
-   rmdir /s whatsapp-gateway\auth_info
-   ```
-3. Ou use o script auxiliar (Linux/Mac):
-   ```bash
-   chmod +x reset-auth.sh
-   ./reset-auth.sh
-   ```
-4. Inicie o gateway novamente (`npm start`)
-5. Escaneie o novo QR Code que aparecerá
+- Verifique se Redis está rodando: `redis-cli ping`
+- Verifique se worker está rodando: `npm run start:worker`
+- Verifique logs em `../logs/gateway.log` e `../logs/app.log`
 
-### Outros Problemas
+### Jobs ficam travados
 
-- **Gateway não conecta ao WhatsApp**: Verifique se escaneou o QR Code corretamente
-- **Mensagens não são processadas**: Verifique os logs do gateway e do backend Python
-- **Erro ao chamar backend**: Verifique se o backend está rodando em `http://localhost:8000`
+- Verifique locks no Redis: `redis-cli KEYS "lock:jid:*"`
+- Se necessário, delete locks manualmente: `redis-cli DEL lock:jid:SEU_JID`
+
+### Backend offline
+
+- Jobs ficam na fila e são processados quando backend voltar
+- BullMQ retenta automaticamente (3 tentativas com backoff)
 
 ## Notas
 
-- O gateway só processa mensagens de texto de conversas individuais (não grupos)
+- O gateway só processa mensagens de conversas individuais (não grupos)
 - Mensagens enviadas pelo próprio bot são ignoradas
 - O gateway reconecta automaticamente se a conexão cair (exceto erros 401)
-- Conversas iniciadas por link direto (`@lid`) são suportadas
-
+- Conversas iniciadas por link direto (`@lid`) são suportadas e mapeadas no Redis

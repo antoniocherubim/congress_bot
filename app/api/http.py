@@ -126,6 +126,52 @@ def create_app() -> FastAPI:
     # Adicionar middleware de request_id
     app.add_middleware(RequestIDMiddleware)
 
+    @app.get("/health")
+    def health_check():
+        """
+        Endpoint de health check para monitoramento e Docker healthchecks.
+        """
+        try:
+            # Verificar conexão com Redis (se configurado)
+            redis_ok = True
+            if config.redis_url and config.redis_url.strip():
+                try:
+                    from redis import Redis
+                    redis_client = Redis.from_url(config.redis_url)
+                    redis_client.ping()
+                    redis_ok = True
+                except Exception as e:
+                    logger.warning(f"Redis health check falhou: {e}")
+                    redis_ok = False
+            
+            # Verificar conexão com banco de dados
+            db_ok = True
+            try:
+                from ..storage.database import create_engine_from_url
+                engine = create_engine_from_url(config.database_url)
+                with engine.connect() as conn:
+                    from sqlalchemy import text
+                    conn.execute(text("SELECT 1"))
+                db_ok = True
+            except Exception as e:
+                logger.warning(f"Database health check falhou: {e}")
+                db_ok = False
+            
+            # Status geral
+            status = "healthy" if (redis_ok and db_ok) else "degraded"
+            
+            return {
+                "status": status,
+                "redis": "ok" if redis_ok else "error",
+                "database": "ok" if db_ok else "error",
+            }
+        except Exception as e:
+            logger.error(f"Erro no health check: {e}")
+            return {
+                "status": "error",
+                "error": str(e),
+            }, 500
+
     @app.post("/chat", response_model=ChatResponse)
     def chat_endpoint(payload: ChatRequest, request: Request) -> ChatResponse:
         request_id = getattr(request.state, "request_id", "unknown")

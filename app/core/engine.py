@@ -1,6 +1,7 @@
 import logging
 from typing import Dict, Any, Optional
 from .session_manager import InMemorySessionManager
+from ..session.redis_session_manager import RedisSessionManager
 from .models import Message, Role
 from .registration_manager import RegistrationManager, RegistrationFlowHint
 from ..config import AppConfig
@@ -25,7 +26,23 @@ class ChatbotEngine:
 
     def __init__(self, config: AppConfig) -> None:
         self._config = config
-        self._sessions = InMemorySessionManager(max_stored_turns=config.session_max_stored_turns)
+        
+        # Escolher gerenciador de sessões: Redis se configurado, senão InMemory
+        if config.redis_url and config.redis_url.strip():
+            try:
+                self._sessions = RedisSessionManager(
+                    redis_url=config.redis_url,
+                    max_stored_turns=config.session_max_stored_turns,
+                    session_ttl_seconds=config.session_ttl_seconds,
+                )
+                logger.info(f"Sessões usando Redis: url={config.redis_url}")
+            except Exception as e:
+                logger.error(f"Erro ao inicializar RedisSessionManager: {e}, usando InMemory como fallback")
+                self._sessions = InMemorySessionManager(max_stored_turns=config.session_max_stored_turns)
+        else:
+            self._sessions = InMemorySessionManager(max_stored_turns=config.session_max_stored_turns)
+            logger.info("Sessões usando armazenamento em memória (REDIS_URL não configurado)")
+        
         self._lm_client = LanguageModelClient(config)
         
         # Extrair tipo de DB da URL (sem credenciais)
@@ -46,7 +63,10 @@ class ChatbotEngine:
             self._event_info = get_event_info()
             logger.info("Carregando informações reais do evento BioSummit 2026.")
         
-        self._db_session_factory = create_session_factory(config.database_url)
+        # Em produção, não criar tabelas automaticamente (usar Alembic)
+        # Em dev, permitir criação automática se necessário
+        create_tables = config.env == "dev"
+        self._db_session_factory = create_session_factory(config.database_url, create_tables=create_tables)
         self._email_service = EmailService(config)
         self._registration_manager = RegistrationManager(
             db_session_factory=self._db_session_factory,
@@ -347,8 +367,13 @@ class ChatbotEngine:
             assistant_msg=reply_text,
             max_stored_turns=self._config.session_max_stored_turns
         )
+        
+        # 8. Salvar sessão (especialmente importante para Redis)
+        # InMemorySessionManager não precisa de save explícito, mas RedisSessionManager sim
+        if isinstance(self._sessions, RedisSessionManager):
+            self._sessions.save_session(user_id, state)
 
-        # 8. Retornar resposta com metadados mínimos
+        # 9. Retornar resposta com metadados mínimos
         return {
             "user_id": user_id,
             "reply": reply_text,

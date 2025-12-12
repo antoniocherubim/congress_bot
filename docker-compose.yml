@@ -1,0 +1,105 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: congress_bot_postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-congress_bot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-congress_bot_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-congress_bot}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-congress_bot}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - congress_bot_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: congress_bot_redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - congress_bot_network
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: congress_bot_api
+    environment:
+      # OpenAI
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-3o-mini}
+      
+      # Database
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://congress_bot:congress_bot_pass@postgres:5432/congress_bot}
+      
+      # Redis
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-604800}
+      
+      # Environment
+      ENV: ${ENV:-prod}
+      BOT_API_KEY: ${BOT_API_KEY}
+      
+      # Email (SMTP)
+      SMTP_HOST: ${SMTP_HOST:-dev-log}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-inscricao@biosummit.com.br}
+      
+      # Mock
+      BIOSUMMIT_MOCK_EVENT_DATA: ${BIOSUMMIT_MOCK_EVENT_DATA:-0}
+      
+      # Session limits
+      SESSION_MAX_STORED_TURNS: ${SESSION_MAX_STORED_TURNS:-30}
+      
+      # OpenAI config
+      OPENAI_TIMEOUT_MS: ${OPENAI_TIMEOUT_MS:-20000}
+      OPENAI_MAX_RETRIES: ${OPENAI_MAX_RETRIES:-3}
+      OPENAI_RETRY_BASE_DELAY_MS: ${OPENAI_RETRY_BASE_DELAY_MS:-400}
+      
+      # Audio limits
+      MAX_AUDIO_BASE64_CHARS: ${MAX_AUDIO_BASE64_CHARS:-12000000}
+      MAX_AUDIO_BYTES: ${MAX_AUDIO_BYTES:-8388608}
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - congress_bot_network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  congress_bot_network:
+    driver: bridge
+

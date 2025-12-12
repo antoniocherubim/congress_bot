@@ -54,6 +54,8 @@ class AppConfig:
     openai_retry_base_delay_ms: int = 400  # delay base em ms para retry (backoff exponencial)
     max_audio_base64_chars: int = 12_000_000  # limite de caracteres no base64
     max_audio_bytes: int = 8 * 1024 * 1024  # limite de bytes após decodificar (8MB)
+    redis_url: str = ""  # URL do Redis (ex: redis://localhost:6379/0)
+    session_ttl_seconds: int = 604800  # TTL de sessão em segundos (7 dias padrão)
 
     @classmethod
     def load_from_env(cls) -> "AppConfig":
@@ -111,6 +113,8 @@ class AppConfig:
         openai_retry_base_delay_ms = int(os.getenv("OPENAI_RETRY_BASE_DELAY_MS", "400"))
         max_audio_base64_chars = int(os.getenv("MAX_AUDIO_BASE64_CHARS", "12000000"))
         max_audio_bytes = int(os.getenv("MAX_AUDIO_BYTES", str(8 * 1024 * 1024)))
+        redis_url = os.getenv("REDIS_URL", "")
+        session_ttl_seconds = int(os.getenv("SESSION_TTL_SECONDS", "604800"))  # 7 dias
         
         return cls(
             openai_api_key=api_key,
@@ -130,5 +134,7 @@ class AppConfig:
             openai_retry_base_delay_ms=openai_retry_base_delay_ms,
             max_audio_base64_chars=max_audio_base64_chars,
             max_audio_bytes=max_audio_bytes,
+            redis_url=redis_url,
+            session_ttl_seconds=session_ttl_seconds,
         )
 

@@ -42,6 +42,12 @@ Este arquivo documenta todas as variáveis de ambiente necessárias para o proje
 - `MAX_AUDIO_BASE64_CHARS` (opcional, padrão: `12000000`): Tamanho máximo do base64 em caracteres
 - `MAX_AUDIO_BYTES` (opcional, padrão: `8388608`): Tamanho máximo do áudio após decodificar em bytes (8MB)
 
+## Redis (Sessões)
+- `REDIS_URL` (opcional): URL de conexão Redis (ex: `redis://localhost:6379/0`)
+  - Se não configurado, o sistema usa armazenamento em memória (apenas para desenvolvimento)
+  - Em produção, é altamente recomendado usar Redis
+- `SESSION_TTL_SECONDS` (opcional, padrão: `604800`): TTL de sessão em segundos (7 dias padrão)
+
 ## Exemplo de arquivo .env
 
 ```env

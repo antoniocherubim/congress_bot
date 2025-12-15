@@ -32,6 +32,33 @@ const PORT = process.env.PORT || 3333;
 const BOT_API_KEY = process.env.BOT_API_KEY;
 
 let sockGlobal = null;
+let whatsappConnected = false;
+let isRecoveringAuth = false;
+let lastQr = null;
+let lastQrAt = null;
+
+function clearAuthInfoContents(authDir) {
+  // authDir é um mountpoint (bind mount). Não podemos remover o diretório em si (EBUSY).
+  // Em vez disso, removemos somente o conteúdo interno.
+  try {
+    if (!fs.existsSync(authDir)) {
+      fs.mkdirSync(authDir, { recursive: true });
+      return;
+    }
+
+    const entries = fs.readdirSync(authDir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(authDir, entry.name);
+      try {
+        fs.rmSync(fullPath, { recursive: true, force: true });
+      } catch (e) {
+        console.warn('[Gateway] Falha ao remover item de auth_info:', fullPath, e?.message || e);
+      }
+    }
+  } catch (e) {
+    console.error('[Gateway] Falha ao limpar conteúdos de auth_info:', e?.message || e);
+  }
+}
 
 // Configuração de logging para arquivo
 const logDir = path.join(__dirname, '..', 'logs');
@@ -138,9 +165,14 @@ async function startBaileys() {
       console.log('QR Code gerado, escaneie com o WhatsApp:');
       qrcode.generate(qr, { small: true });
       reconnectAttempts = 0; // Reset contador ao gerar QR
+
+      // Guardar o último QR em memória para exibir via API (painel web)
+      lastQr = qr;
+      lastQrAt = new Date().toISOString();
     }
 
     if (connection === 'close') {
+      whatsappConnected = false;
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       const isLoggedOut = statusCode === DisconnectReason.loggedOut;
       const isUnauthorized = statusCode === 401;
@@ -154,13 +186,33 @@ async function startBaileys() {
         console.error('⚠️  ERRO: Sessão expirada ou invalidada (401/Logged Out)');
         console.error('');
         console.error('Para resolver:');
-        console.error('1. Pare o gateway');
-        console.error('2. Delete a pasta auth_info:');
-        console.error('   rm -rf whatsapp-gateway/auth_info');
-        console.error('3. Inicie o gateway novamente e escaneie o QR Code');
+        console.error('1. Gere um novo QR Code (o gateway tentará recuperar automaticamente)');
+        console.error('2. Se necessário, limpe auth_info e reconecte');
         console.error('');
         reconnectAttempts = 0;
-        process.exit(1);
+
+        // Em vez de derrubar o container em loop, tentamos recuperar automaticamente:
+        // - limpar credenciais
+        // - reiniciar o Baileys para gerar novo QR
+        if (!isRecoveringAuth) {
+          isRecoveringAuth = true;
+          try {
+            console.warn('[Gateway] Limpando auth_info para forçar novo QR...');
+            const authDir = path.join(__dirname, 'auth_info');
+            clearAuthInfoContents(authDir);
+          } catch (e) {
+            console.error('[Gateway] Falha ao limpar auth_info:', e?.message || e);
+          }
+
+          // Reiniciar Baileys depois de um pequeno delay (mantém HTTP server vivo)
+          setTimeout(() => {
+            isRecoveringAuth = false;
+            startBaileys().catch((err) => {
+              console.error('[Gateway] Erro ao reiniciar Baileys após 401:', err?.message || err);
+            });
+          }, 1500);
+        }
+        return;
       } else if (isTimeout) {
         reconnectAttempts++;
         
@@ -202,6 +254,11 @@ async function startBaileys() {
       console.log('✅ Conectado ao WhatsApp com sucesso!');
       reconnectAttempts = 0; // Reset contador ao conectar com sucesso
       sockGlobal = sock; // Salvar referência global
+      whatsappConnected = true;
+
+      // Ao conectar, não precisamos mais do QR
+      lastQr = null;
+      lastQrAt = null;
     }
   });
 
@@ -290,6 +347,8 @@ async function startBaileys() {
     }
   });
 
+  // Manter referência para endpoints internos mesmo antes de conectar,
+  // mas use whatsappConnected para indicar conexão real.
   sockGlobal = sock;
 }
 
@@ -349,11 +408,123 @@ app.post('/send-text', async (req, res) => {
   }
 });
 
+// Endpoint administrativo para desconectar o WhatsApp (force logout)
+// Mantemos protegido por X-API-KEY. Ideal chamar via API 8000 (proxy), não expor publicamente.
+app.post('/admin/disconnect', async (req, res) => {
+  try {
+    // Verificar autenticação se BOT_API_KEY estiver configurada
+    if (BOT_API_KEY && BOT_API_KEY.trim()) {
+      const providedKey = req.headers['x-api-key'];
+      if (!providedKey || providedKey !== BOT_API_KEY) {
+        return res.status(401).json({
+          error: 'Não autorizado. X-API-KEY inválida ou ausente.',
+        });
+      }
+    }
+
+    const clearAuth = req.body?.clear_auth === true;
+
+    // Tentar logout no Baileys (se existir)
+    if (sockGlobal && typeof sockGlobal.logout === 'function') {
+      try {
+        await sockGlobal.logout();
+      } catch (e) {
+        // logout pode falhar se já estiver desconectado; seguimos adiante
+        console.warn('[Admin] Falha ao executar logout():', e?.message || e);
+      }
+    }
+
+    whatsappConnected = false;
+    lastQr = null;
+    lastQrAt = null;
+
+    // Opcional: limpar credenciais para forçar QR code na próxima inicialização
+    if (clearAuth) {
+      try {
+        const authDir = path.join(__dirname, 'auth_info');
+        clearAuthInfoContents(authDir);
+        console.log('[Admin] auth_info limpo com sucesso.');
+      } catch (e) {
+        console.error('[Admin] Erro ao limpar auth_info:', e?.message || e);
+      }
+    }
+
+    // Responder antes de reiniciar o processo (Docker restart policy)
+    res.json({
+      ok: true,
+      disconnected: true,
+      clear_auth: clearAuth,
+    });
+
+    // Reiniciar processo para garantir que o Baileys recrie a sessão/QR
+    setTimeout(() => {
+      console.log('[Admin] Reiniciando gateway após disconnect...');
+      process.exit(0);
+    }, 300);
+  } catch (error) {
+    console.error('[Erro no /admin/disconnect]', error);
+    res.status(500).json({
+      ok: false,
+      error: 'Erro ao desconectar',
+      message: error.message,
+    });
+  }
+});
+
+// Endpoint administrativo para obter o último QR Code (string) para renderizar no painel web
+// Retorna o "qr" cru (payload). O frontend pode renderizar com uma lib de QR.
+app.get('/admin/qr', (req, res) => {
+  try {
+    // Verificar autenticação se BOT_API_KEY estiver configurada
+    if (BOT_API_KEY && BOT_API_KEY.trim()) {
+      const providedKey = req.headers['x-api-key'];
+      if (!providedKey || providedKey !== BOT_API_KEY) {
+        return res.status(401).json({
+          error: 'Não autorizado. X-API-KEY inválida ou ausente.',
+        });
+      }
+    }
+
+    return res.json({
+      ok: true,
+      whatsapp_connected: whatsappConnected,
+      has_qr: Boolean(lastQr),
+      qr: lastQr, // string do QR para ser renderizada no frontend
+      qr_created_at: lastQrAt,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error('[Erro no /admin/qr]', error);
+    return res.status(500).json({
+      ok: false,
+      error: 'Erro ao obter QR',
+      message: error.message,
+    });
+  }
+});
+
 // Endpoint de health check
 app.get('/health', (req, res) => {
+  // Em Baileys Multi-Device, o id pode vir como "55...:device@s.whatsapp.net"
+  // Vamos expor o JID completo e também um número "normalizado" quando possível.
+  const connectedJid = whatsappConnected ? (sockGlobal?.user?.id || null) : null;
+  let connectedNumber = null;
+  if (connectedJid && typeof connectedJid === 'string') {
+    // 1) remover domínio "@s.whatsapp.net"
+    const beforeAt = connectedJid.split('@')[0];
+    // 2) remover sufixo de device ":xyz" se existir
+    connectedNumber = beforeAt.split(':')[0] || null;
+  }
+  const connectedName = whatsappConnected ? (sockGlobal?.user?.name || null) : null;
+
   res.json({
     status: 'ok',
-    whatsapp_connected: sockGlobal !== null,
+    whatsapp_connected: whatsappConnected,
+    connected_jid: connectedJid,
+    connected_number: connectedNumber,
+    connected_name: connectedName,
+    has_qr: Boolean(lastQr),
+    qr_created_at: lastQrAt,
     timestamp: new Date().toISOString(),
   });
 });

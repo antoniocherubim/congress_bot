@@ -56,7 +56,7 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://congress_bot:congress_bot_pass@postgres:5432/congress_bot}
       
       # Redis
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      REDIS_URL: redis://redis:6379/0
       SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-604800}
       SESSION_MAX_STORED_TURNS: ${SESSION_MAX_STORED_TURNS:-30}
       

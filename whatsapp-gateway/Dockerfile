@@ -5,6 +5,9 @@ WORKDIR /app
 # Copiar arquivos de dependências
 COPY package*.json ./
 
+# Instalar npm 10.8.2
+RUN npm install -g npm@10.8.2
+
 # Instalar dependências
 RUN npm ci --only=production
 

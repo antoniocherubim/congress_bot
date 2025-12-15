@@ -2,6 +2,171 @@
 
 MVP de um chatbot para congresso na área do agro, com arquitetura preparada para evoluir para sistema de matchmaking.
 
+## 🚀 Guia Rápido de Início
+
+### Pré-requisitos
+- Docker e Docker Compose instalados
+- Chave da API OpenAI
+
+### Passo a Passo
+
+#### 1️⃣ Criar arquivo de configuração principal (`.env`)
+
+Na raiz do projeto, crie um arquivo `.env` com o seguinte conteúdo:
+
+```env
+# OpenAI (OBRIGATÓRIO)
+OPENAI_API_KEY=sua-chave-openai-aqui
+
+# Database (valores padrão já configurados)
+DATABASE_URL=postgresql+psycopg://congress_bot:congress_bot_pass@postgres:5432/congress_bot
+POSTGRES_USER=congress_bot
+POSTGRES_PASSWORD=congress_bot_pass
+POSTGRES_DB=congress_bot
+
+# Redis (valores padrão já configurados)
+REDIS_URL=redis://redis:6379/0
+
+# Segurança (OBRIGATÓRIO em produção)
+BOT_API_KEY=uma-chave-secreta-aleatoria-aqui
+
+# Ambiente
+ENV=prod
+```
+
+#### 2️⃣ Criar arquivo de configuração do gateway (`whatsapp-gateway/.env`)
+
+No diretório `whatsapp-gateway/`, crie um arquivo `.env`:
+
+```env
+# Backend API
+BOT_URL=http://api:8000
+BOT_API_KEY=uma-chave-secreta-aleatoria-aqui  # DEVE SER IGUAL ao BOT_API_KEY do .env principal
+
+# Redis
+REDIS_HOST=redis
+REDIS_PORT=6379
+
+# Gateway
+PORT=3333
+QUEUE_CONCURRENCY=20
+```
+
+**⚠️ Importante:** O `BOT_API_KEY` deve ser **exatamente igual** nos dois arquivos `.env`.
+
+#### 3️⃣ Iniciar os serviços
+
+```bash
+# Na raiz do projeto
+docker-compose up -d
+```
+
+Este comando irá:
+- ✅ Criar e iniciar todos os containers (PostgreSQL, Redis, API, Gateway, Worker)
+- ✅ Executar as migrações do banco de dados automaticamente
+- ✅ Configurar a rede Docker para comunicação entre serviços
+
+#### 4️⃣ Verificar se tudo está funcionando
+
+```bash
+# Ver status de todos os containers
+docker-compose ps
+
+# Ver logs em tempo real
+docker-compose logs -f
+
+# Testar a API
+curl http://localhost:8000/health
+```
+
+Você deve ver uma resposta como:
+```json
+{
+  "status": "healthy",
+  "redis": "ok",
+  "database": "ok"
+}
+```
+
+#### 5️⃣ Conectar o WhatsApp (Primeira vez)
+
+1. Verifique os logs do gateway:
+```bash
+docker-compose logs -f gateway
+```
+
+2. Procure pelo **QR Code** nos logs (aparece como uma imagem ASCII ou um link)
+
+3. Abra o WhatsApp no seu celular:
+   - Vá em **Configurações** → **Aparelhos conectados** → **Conectar um aparelho**
+   - Escaneie o QR Code que aparece nos logs
+
+4. Após conectar, a sessão será salva automaticamente em `whatsapp-gateway/auth_info/`
+
+#### 6️⃣ Testar o chatbot
+
+**Opção A: Via WhatsApp**
+- Envie uma mensagem para o número conectado no WhatsApp
+- O bot deve responder automaticamente
+
+**Opção B: Via API HTTP**
+```bash
+curl -X POST http://localhost:8000/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "teste123",
+    "message": "Olá!"
+  }'
+```
+
+### ✅ Pronto!
+
+Seu chatbot está rodando! Você pode:
+- Acessar a documentação interativa: http://localhost:8000/docs
+- Ver logs: `docker-compose logs -f [servico]`
+- Parar tudo: `docker-compose down`
+- Reiniciar um serviço: `docker-compose restart [servico]`
+
+### 🔧 Comandos Úteis
+
+```bash
+# Parar todos os serviços
+docker-compose down
+
+# Parar e remover volumes (remove dados do banco)
+docker-compose down -v
+
+# Reconstruir imagens após mudanças no código
+docker-compose up -d --build
+
+# Ver logs de um serviço específico
+docker-compose logs -f api      # Backend Python
+docker-compose logs -f gateway  # Gateway WhatsApp
+docker-compose logs -f worker   # Worker de processamento
+docker-compose logs -f postgres # Banco de dados
+docker-compose logs -f redis    # Redis
+
+# Reiniciar um serviço específico
+docker-compose restart api
+docker-compose restart gateway
+```
+
+### ❌ Problemas Comuns
+
+**Porta já em uso:**
+- Verifique se há outros serviços usando as portas 5432, 6379, 8000 ou 3333
+- Altere as portas no `docker-compose.yml` se necessário
+
+**Gateway não conecta:**
+- Verifique os logs: `docker-compose logs -f gateway`
+- Remova a autenticação antiga: `rm -rf whatsapp-gateway/auth_info/*` e reconecte
+
+**API não inicia:**
+- Verifique se `OPENAI_API_KEY` está configurada no `.env`
+- Verifique os logs: `docker-compose logs -f api`
+
+---
+
 ## Estrutura do Projeto
 
 ```

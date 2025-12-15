@@ -3,10 +3,14 @@ import base64
 import tempfile
 import time
 import hashlib
+import json
+import os
+import urllib.request
+import urllib.error
 from uuid import uuid4
 from fastapi import FastAPI, HTTPException, Header, Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
-from typing import Optional
+from typing import Optional, List
 from pydantic import BaseModel
 from openai import OpenAI
 from ..config import AppConfig
@@ -18,6 +22,7 @@ logger = logging.getLogger(__name__)
 class ChatRequest(BaseModel):
     user_id: str
     message: str
+    context_type: Optional[str] = None  # Tipo de contexto (ex: "default", "event_info", "registration")
 
 
 class ChatResponse(BaseModel):
@@ -29,6 +34,7 @@ class ChatResponse(BaseModel):
 class WhatsAppMessage(BaseModel):
     number: str
     text: str
+    context_type: Optional[str] = None  # Tipo de contexto (ex: "default", "event_info", "registration")
 
 
 class WhatsAppResponse(BaseModel):
@@ -41,6 +47,38 @@ class AudioTranscribeRequest(BaseModel):
 
 class AudioTranscribeResponse(BaseModel):
     text: str
+
+
+class MessageHistoryItem(BaseModel):
+    role: str
+    content: str
+
+
+class ChatTurnHistory(BaseModel):
+    user_message: MessageHistoryItem
+    assistant_message: MessageHistoryItem
+
+
+class HistoryResponse(BaseModel):
+    user_id: str
+    turns: int
+    history: List[ChatTurnHistory]
+    registration_step: str
+    registration_data: dict
+
+
+class DisconnectResponse(BaseModel):
+    ok: bool
+    disconnected: bool
+    clear_auth: bool
+
+
+class QRStatusResponse(BaseModel):
+    ok: bool
+    whatsapp_connected: bool
+    has_qr: bool
+    qr: Optional[str] = None
+    qr_created_at: Optional[str] = None
 
 
 class RequestIDMiddleware(BaseHTTPMiddleware):
@@ -126,6 +164,81 @@ def create_app() -> FastAPI:
     # Adicionar middleware de request_id
     app.add_middleware(RequestIDMiddleware)
 
+    def fetch_json(url: str, timeout_s: float) -> dict:
+        """
+        Fetch JSON via stdlib (sem dependências extras).
+        Retorna dict. Levanta exceção em falhas de rede/HTTP/parse.
+        """
+        req = urllib.request.Request(
+            url,
+            method="GET",
+            headers={"Accept": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+            body = resp.read()
+            try:
+                return json.loads(body.decode("utf-8"))
+            except Exception as e:
+                raise RuntimeError(f"Resposta não-JSON em {url}: {e}") from e
+
+    def post_json(url: str, payload: dict, timeout_s: float, headers: Optional[dict] = None) -> dict:
+        """
+        POST JSON via stdlib (sem dependências extras).
+        Retorna dict. Levanta exceção em falhas de rede/HTTP/parse.
+        """
+        data = json.dumps(payload).encode("utf-8")
+        req_headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        }
+        if headers:
+            req_headers.update(headers)
+
+        req = urllib.request.Request(
+            url,
+            data=data,
+            method="POST",
+            headers=req_headers,
+        )
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+            body = resp.read()
+            try:
+                return json.loads(body.decode("utf-8"))
+            except Exception as e:
+                raise RuntimeError(f"Resposta não-JSON em {url}: {e}") from e
+
+    def _normalize_base_url(url: str) -> str:
+        url = (url or "").strip()
+        if url.endswith("/"):
+            url = url[:-1]
+        return url
+
+    def gateway_base_url_candidates() -> List[str]:
+        """
+        Retorna uma lista de URLs base possíveis para o gateway.
+        Em alguns ambientes, o hostname do serviço pode ser 'gateway' ou o container_name (ex: 'biosummit-gateway').
+        """
+        env_url = os.environ.get("GATEWAY_URL")
+        env_health_url = os.environ.get("GATEWAY_HEALTH_URL")
+
+        # Se o usuário configurar explicitamente, damos prioridade.
+        if env_health_url and env_health_url.strip():
+            # Converter /health -> base
+            u = _normalize_base_url(env_health_url)
+            if u.endswith("/health"):
+                u = u[: -len("/health")]
+            return [_normalize_base_url(u)]
+
+        if env_url and env_url.strip():
+            return [_normalize_base_url(env_url)]
+
+        # Defaults: dentro do docker-compose, tente primeiro o service name, depois o container_name.
+        if config.env == "prod":
+            return ["http://gateway:3333", "http://biosummit-gateway:3333"]
+
+        # Em dev local, pode existir gateway exposto no host.
+        return ["http://localhost:3333", "http://gateway:3333", "http://biosummit-gateway:3333"]
+
     @app.get("/health")
     def health_check():
         """
@@ -156,14 +269,50 @@ def create_app() -> FastAPI:
             except Exception as e:
                 logger.warning(f"Database health check falhou: {e}")
                 db_ok = False
+
+            # Verificar health do gateway WhatsApp (tenta múltiplos hosts possíveis)
+            gateway_reachable = False
+            gateway_payload: dict = {}
+            gateway_used_url: Optional[str] = None
+            gateway_timeout_s = 2.0
+            gateway_start = time.time()
+            last_gateway_error: Optional[str] = None
+            for base_url in gateway_base_url_candidates():
+                gateway_health_url = f"{base_url}/health"
+                try:
+                    gateway_payload = fetch_json(gateway_health_url, timeout_s=gateway_timeout_s)
+                    gateway_reachable = True
+                    gateway_used_url = gateway_health_url
+                    break
+                except Exception as e:
+                    last_gateway_error = str(e)
+                    logger.warning(f"Gateway health check falhou: url={gateway_health_url}, error={e}")
+                    continue
+
+            if not gateway_reachable:
+                gateway_payload = {"error": last_gateway_error or "Gateway indisponível"}
+            gateway_duration_ms = (time.time() - gateway_start) * 1000
+
+            gateway_whatsapp_connected = bool(gateway_payload.get("whatsapp_connected")) if gateway_reachable else False
             
             # Status geral
-            status = "healthy" if (redis_ok and db_ok) else "degraded"
+            status = (
+                "healthy"
+                if (redis_ok and db_ok and gateway_reachable and gateway_whatsapp_connected)
+                else "degraded"
+            )
             
             return {
                 "status": status,
                 "redis": "ok" if redis_ok else "error",
                 "database": "ok" if db_ok else "error",
+                "gateway": {
+                    "reachable": gateway_reachable,
+                    "whatsapp_connected": gateway_whatsapp_connected,
+                    "health": gateway_payload,
+                    "url": gateway_used_url,
+                    "duration_ms": round(gateway_duration_ms, 2),
+                },
             }
         except Exception as e:
             logger.error(f"Erro no health check: {e}")
@@ -171,6 +320,143 @@ def create_app() -> FastAPI:
                 "status": "error",
                 "error": str(e),
             }, 500
+
+    @app.post("/ops/whatsapp/disconnect", response_model=DisconnectResponse)
+    def ops_disconnect_whatsapp(
+        request: Request,
+        clear_auth: bool = True,
+        x_api_key: Optional[str] = Header(default=None, alias="X-API-KEY"),
+    ) -> DisconnectResponse:
+        """
+        Endpoint operacional para desconectar o WhatsApp via gateway.
+
+        - Valida X-API-KEY (mesma regra do /whatsapp).
+        - Faz proxy interno para o gateway em http://gateway:3333/admin/disconnect.
+        - clear_auth=true (padrão) limpa auth_info para forçar QR code na próxima inicialização.
+        """
+        request_id = getattr(request.state, "request_id", "unknown")
+
+        # Validar API key
+        require_api_key(config, x_api_key)
+
+        start_time = time.time()
+        try:
+            resp: Optional[dict] = None
+            used_url: Optional[str] = None
+            last_error: Optional[Exception] = None
+
+            for base_url in gateway_base_url_candidates():
+                disconnect_url = f"{base_url}/admin/disconnect"
+                try:
+                    resp = post_json(
+                        disconnect_url,
+                        payload={"clear_auth": bool(clear_auth)},
+                        timeout_s=5.0,
+                        headers={"X-API-KEY": config.bot_api_key} if config.bot_api_key else None,
+                    )
+                    used_url = disconnect_url
+                    break
+                except Exception as e:
+                    last_error = e
+                    continue
+
+            if resp is None:
+                raise last_error or RuntimeError("Falha ao desconectar (gateway indisponível)")
+
+            duration_ms = (time.time() - start_time) * 1000
+            logger.info(
+                f"WhatsApp disconnect solicitado: request_id={request_id}, "
+                f"url={used_url}, duration_ms={duration_ms:.2f}, clear_auth={clear_auth}"
+            )
+            return DisconnectResponse(
+                ok=bool(resp.get("ok", True)),
+                disconnected=bool(resp.get("disconnected", True)),
+                clear_auth=bool(resp.get("clear_auth", clear_auth)),
+            )
+        except urllib.error.HTTPError as e:
+            duration_ms = (time.time() - start_time) * 1000
+            logger.error(
+                f"Erro HTTP ao desconectar no gateway: request_id={request_id}, "
+                f"status={e.code}, duration_ms={duration_ms:.2f}"
+            )
+            raise HTTPException(status_code=502, detail=f"Gateway respondeu {e.code} no disconnect")
+        except Exception as e:
+            duration_ms = (time.time() - start_time) * 1000
+            logger.error(
+                f"Erro ao desconectar no gateway: request_id={request_id}, "
+                f"duration_ms={duration_ms:.2f}, "
+                f"error={type(e).__name__}: {e}",
+                exc_info=True,
+            )
+            raise HTTPException(status_code=502, detail="Falha ao solicitar disconnect ao gateway")
+
+    @app.get("/ops/whatsapp/qr", response_model=QRStatusResponse)
+    def ops_get_whatsapp_qr(
+        request: Request,
+        x_api_key: Optional[str] = Header(default=None, alias="X-API-KEY"),
+    ) -> QRStatusResponse:
+        """
+        Endpoint operacional para obter o QR code atual (string) para exibição no painel web.
+
+        - Valida X-API-KEY (mesma regra do /whatsapp).
+        - Faz proxy interno para o gateway em /admin/qr.
+        """
+        request_id = getattr(request.state, "request_id", "unknown")
+
+        # Validar API key
+        require_api_key(config, x_api_key)
+
+        start_time = time.time()
+        try:
+            resp: Optional[dict] = None
+            used_url: Optional[str] = None
+            last_error: Optional[Exception] = None
+
+            for base_url in gateway_base_url_candidates():
+                qr_url = f"{base_url}/admin/qr"
+                try:
+                    # Como é GET, usamos fetch_json
+                    # Enviamos X-API-KEY do serviço para o gateway
+                    req = urllib.request.Request(
+                        qr_url,
+                        method="GET",
+                        headers={
+                            "Accept": "application/json",
+                            **({"X-API-KEY": config.bot_api_key} if config.bot_api_key else {}),
+                        },
+                    )
+                    with urllib.request.urlopen(req, timeout=5.0) as r:
+                        body = r.read()
+                        resp = json.loads(body.decode("utf-8"))
+                    used_url = qr_url
+                    break
+                except Exception as e:
+                    last_error = e
+                    continue
+
+            if resp is None:
+                raise last_error or RuntimeError("Falha ao obter QR (gateway indisponível)")
+
+            duration_ms = (time.time() - start_time) * 1000
+            logger.info(
+                f"QR consultado: request_id={request_id}, url={used_url}, duration_ms={duration_ms:.2f}"
+            )
+
+            return QRStatusResponse(
+                ok=bool(resp.get("ok", True)),
+                whatsapp_connected=bool(resp.get("whatsapp_connected", False)),
+                has_qr=bool(resp.get("has_qr", False)),
+                qr=resp.get("qr"),
+                qr_created_at=resp.get("qr_created_at"),
+            )
+        except Exception as e:
+            duration_ms = (time.time() - start_time) * 1000
+            logger.error(
+                f"Erro ao obter QR no gateway: request_id={request_id}, duration_ms={duration_ms:.2f}, "
+                f"error={type(e).__name__}: {e}",
+                exc_info=True,
+            )
+            raise HTTPException(status_code=502, detail="Falha ao obter QR do gateway")
 
     @app.post("/chat", response_model=ChatResponse)
     def chat_endpoint(payload: ChatRequest, request: Request) -> ChatResponse:
@@ -190,6 +476,7 @@ def create_app() -> FastAPI:
                 user_id=payload.user_id,
                 message_text=payload.message,
                 request_id=request_id,
+                context_type=payload.context_type,
             )
             
             duration_ms = (time.time() - start_time) * 1000
@@ -250,6 +537,7 @@ def create_app() -> FastAPI:
                 user_id=user_id,
                 message_text=user_text,
                 request_id=request_id,
+                context_type=payload.context_type,
             )
 
             reply_text = result.get("reply", "").strip()
@@ -397,6 +685,54 @@ def create_app() -> FastAPI:
             raise HTTPException(
                 status_code=500,
                 detail="Erro ao processar o áudio. Tente novamente.",
+            )
+
+    @app.get("/history/{user_id}", response_model=HistoryResponse)
+    def get_history(
+        user_id: str,
+        request: Request,
+    ) -> HistoryResponse:
+        """
+        Endpoint para recuperar o histórico de conversas de um usuário.
+        Retorna todas as mensagens trocadas entre o usuário e o bot.
+        
+        Nota: Este endpoint não requer autenticação, similar ao endpoint /chat.
+        Em produção, considere adicionar autenticação se necessário.
+        """
+        request_id = getattr(request.state, "request_id", "unknown")
+        
+        number_hash = hash_number(user_id) if user_id.isdigit() else user_id[:4] + "****"
+        
+        logger.info(
+            f"Recebida requisição /history: request_id={request_id}, "
+            f"user_id={number_hash}"
+        )
+        
+        start_time = time.time()
+        try:
+            # Recuperar histórico do engine
+            result = engine.get_conversation_history(user_id=user_id)
+            
+            duration_ms = (time.time() - start_time) * 1000
+            logger.info(
+                f"Histórico recuperado: request_id={request_id}, "
+                f"user_id={number_hash}, turns={result.get('turns', 0)}, "
+                f"duration_ms={duration_ms:.2f}"
+            )
+            
+            return HistoryResponse(**result)
+            
+        except Exception as e:
+            duration_ms = (time.time() - start_time) * 1000
+            logger.error(
+                f"Erro ao recuperar histórico: request_id={request_id}, "
+                f"user_id={number_hash}, duration_ms={duration_ms:.2f}, "
+                f"error={type(e).__name__}: {e}",
+                exc_info=True,
+            )
+            raise HTTPException(
+                status_code=500,
+                detail="Erro interno ao recuperar histórico. Tente novamente mais tarde.",
             )
 
     return app
